@@ -95,7 +95,7 @@ with onglets[3]:
         else:
             projection = round(nombre * total / jours)
             st.metric("Projection indicative", projection)
-                        st.caption("Hypothèse : même nombre d'inscriptions par jour.")
+            st.caption("Hypothèse : même nombre d'inscriptions par jour.")
 
 st.divider()
 st.header("🎯 Estimation sans compteur public")
