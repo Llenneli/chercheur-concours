@@ -133,5 +133,40 @@ if st.button("🎯 Calculer les scénarios"):
             "Les taux de 0,5%, 2% et 5% ne sont "
             "pas mesurés pour ce concours. "
             "Une visite n'est pas forcément "
-            "une personne unique."
-        )
+            "une personne st.divider()
+st.header("🎯 Ma réponse subsidiaire")
+
+st.write("Proposition basée sur les hypothèses de participation.")
+
+visites_rep = st.number_input(
+    "Visiteurs supposés par jour",
+    min_value=1,
+    value=1000,
+    step=100,
+    key="visites_reponse"
+)
+
+jours_rep = st.number_input(
+    "Durée du concours en jours",
+    min_value=1,
+    value=30,
+    key="jours_reponse"
+)
+
+taux_rep = st.slider(
+    "Pourcentage supposé des visiteurs qui participent",
+    min_value=0.1,
+    max_value=10.0,
+    value=2.0,
+    step=0.1
+)
+
+if st.button("🏆 Proposer une réponse"):
+    calcul = round(visites_rep * jours_rep * taux_rep / 100)
+    st.metric("Réponse proposée", f"{calcul:,}".replace(",", " "))
+    st.write("Calcul :", visites_rep, "visites/jour ×",
+             jours_rep, "jours ×", taux_rep, "%")
+    st.warning(
+        "Ce résultat est une simulation, pas une prédiction "
+        "vérifiée. Le nombre réel peut être très différent."
+    )
