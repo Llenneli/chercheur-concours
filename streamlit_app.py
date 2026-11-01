@@ -167,6 +167,7 @@ if st.button("🏆 Proposer une réponse"):
     st.write("Calcul :", visites_rep, "visites/jour ×",
              jours_rep, "jours ×", taux_rep, "%")
     st.warning(
-        "Ce résultat est une simulation, pas une prédiction "
-        "vérifiée. Le nombre réel peut être très différent."
+
+"Ce résultat est une simulation, pas une prédiction "
+"vérifiée. Le nombre réel peut être très différent.
     )
