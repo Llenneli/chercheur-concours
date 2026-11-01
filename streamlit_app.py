@@ -95,4 +95,41 @@ with onglets[3]:
         else:
             projection = round(nombre * total / jours)
             st.metric("Projection indicative", projection)
-            st.caption("Hypothèse : même nombre d'inscriptions par jour.")
+            st.caption("Hypothèse : même nombre d'inscriptions par st.divider()
+st.header("🎯 Estimation sans compteur public")
+st.write("Simule le nombre de participants à la clôture.")
+
+date_debut = st.date_input("Début du concours", key="auto_debut")
+date_fin = st.date_input("Date de clôture", key="auto_fin")
+
+visites = st.number_input(
+    "Visites supposées par jour",
+    min_value=1, value=1000, step=100
+)
+
+st.caption(
+    "1000 visites par jour est une hypothèse de départ, "
+    "pas une mesure du site."
+)
+
+if st.button("🎯 Calculer les scénarios"):
+    duree = (date_fin - date_debut).days + 1
+    if duree <= 0:
+        st.error("Vérifie les dates du concours.")
+    else:
+        total_visites = duree * visites
+        taux = [0.005, 0.02, 0.05]
+        noms = ["Basse", "Centrale", "Haute"]
+        for nom, t in zip(noms, taux):
+            estimation = round(total_visites * t)
+            st.metric(
+                "Estimation " + nom,
+                f"{estimation:,} participants"
+            )
+        st.warning(
+            "Résultats purement hypothétiques. "
+            "Les taux de 0,5%, 2% et 5% ne sont "
+            "pas mesurés pour ce concours. "
+            "Une visite n'est pas forcément "
+            "une personne unique."
+        )
