@@ -93,8 +93,6 @@ def trouver_date(texte):
 FDC_SECTIONS = [
     ("Fou de Concours — Belgique",
      "https://www.foudeconcours.com/forum/concours/concours-belges-pour-les-belges"),
-    ("Fou de Concours — Étranger accessible aux Belges",
-     "https://www.foudeconcours.com/forum/concours/concours-etrangers-pour-les-belges"),
 ]
 
 @st.cache_data(ttl=3600)
@@ -111,7 +109,7 @@ def chercher_foudeconcours():
                 path = urlparse(lien).path.rstrip("/")
                 reste = path[len(prefixe):] if path.startswith(prefixe) else ""
                 # Garder les discussions, pas les menus, profils ou catégories.
-                if not re.match(r"^\\d+-[^/]+$", reste):
+                if not re.match(r"^\d+-[^/]+$", reste):
                     continue
                 if not 12 <= len(titre) <= 190 or lien in vus:
                     continue
@@ -175,6 +173,7 @@ tab1, tab2, tab3, tab4 = st.tabs(
 
 with tab1:
     st.subheader("Concours belges, Fou de Concours et dates limites")
+    st.caption("Fou de Concours est un forum : les dates et l’accès aux discussions peuvent nécessiter une vérification.")
     cat = st.selectbox("Catégorie", CATEGORIES)
     mots = st.text_input("Filtrer par mot-clé")
     filtre = st.checkbox("Masquer les concours expirés", value=True)
