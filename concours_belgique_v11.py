@@ -204,7 +204,7 @@ CHAMPS_CARNET = [
 
 def exporter_carnet(lignes):
     tampon = io.StringIO()
-    ecrivain = csv.DictWriter(tampon, fieldnames=CHAMPS_CARNET)
+    ecrivain = csv.DictWriter(tampon, fieldnames=CHAMPS_CARNET, extrasaction="ignore")
     ecrivain.writeheader()
     ecrivain.writerows(lignes)
     return tampon.getvalue().encode("utf-8-sig")
