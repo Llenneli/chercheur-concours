@@ -150,8 +150,16 @@ def chercher_foudeconcours():
                 titre = " ".join(a["titre"].split())
                 lien = urljoin(adresse, a["url"])
                 path = urlparse(lien).path.rstrip("/")
-                reste = path[len(prefixe):] if path.startswith(prefixe) else ""
-                # Garder les discussions, pas les menus, profils ou catégories.
+                # Les accents d'URL peuvent varier entre les liens et la rubrique.
+                from urllib.parse import unquote
+                chemin_lu = unquote(unquote(path)).casefold()
+                if source == "Fou de Concours — Belgique":
+                    bonne_rubrique = "concours-belges-pour-les-belges/" in chemin_lu
+                else:
+                    bonne_rubrique = "trangers-pour-les-belges/" in chemin_lu
+                if not bonne_rubrique:
+                    continue
+                reste = chemin_lu.rsplit("/", 1)[-1]
                 if not re.match(r"^\d+-[^/]+$", reste):
                     continue
                 if not 12 <= len(titre) <= 190 or lien in vus:
