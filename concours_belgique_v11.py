@@ -327,6 +327,8 @@ def requete_supabase(chemin, methode="GET", donnees=None, avec_session=True):
 def enregistrer_jetons(reponse):
     st.session_state.sb_access_token = reponse["access_token"]
     st.session_state.sb_refresh_token = reponse["refresh_token"]
+    # Le mot de passe n'est jamais sauvegardé dans Safari.
+    st.session_state.sb_browser_action = "save"
 
 def renouveler_session():
     jeton = st.session_state.get("sb_refresh_token")
@@ -337,6 +339,68 @@ def renouveler_session():
         "POST", {"refresh_token": jeton}, avec_session=False
     )
     enregistrer_jetons(resultat)
+
+# Connexion conservée sur cet appareil : seul le jeton de renouvellement Supabase
+# est enregistré dans le stockage local du navigateur (jamais le mot de passe).
+# Ce stockage est réservé au navigateur et peut être effacé par Safari.
+STOCKAGE_CONNEXION_JS = """
+export default function({data, setStateValue}) {
+    const cle = "concours_belgique_v11_supabase_refresh_v1";
+    try {
+        if (data?.action === "clear") {
+            window.localStorage.removeItem(cle);
+            setStateValue("refresh_token", null);
+        } else if (data?.action === "save" && data?.refresh_token) {
+            window.localStorage.setItem(cle, data.refresh_token);
+        } else if (data?.action === "read") {
+            const souvenir = window.localStorage.getItem(cle);
+            if (souvenir) setStateValue("refresh_token", souvenir);
+        }
+    } catch (e) {
+        // Safari peut bloquer le stockage local : la connexion manuelle reste possible.
+    }
+}
+"""
+
+def restaurer_connexion_navigateur():
+    """Retrouve une session Supabase sur le même navigateur, sans mot de passe."""
+    try:
+        composant = st.components.v2.component(
+            "concours_belgique_memoire_connexion", js=STOCKAGE_CONNEXION_JS
+        )
+    except AttributeError:
+        # Version de Streamlit trop ancienne pour les composants v2.
+        return
+
+    action = st.session_state.get("sb_browser_action", "read")
+    resultat = composant(
+        key="sb_memoire_navigateur",
+        data={
+            "action": action,
+            "refresh_token": (
+                st.session_state.get("sb_refresh_token", "") if action == "save" else ""
+            ),
+        },
+        on_refresh_token_change=lambda: None,
+    )
+    if (action == "read" and not st.session_state.get("sb_access_token")
+            and not st.session_state.get("sb_recovery_attempted")
+            and getattr(resultat, "refresh_token", None)):
+        st.session_state.sb_recovery_attempted = True
+        st.session_state.sb_refresh_token = resultat.refresh_token
+        try:
+            renouveler_session()
+            st.rerun()
+        except RuntimeError as erreur:
+            st.session_state.pop("sb_access_token", None)
+            st.session_state.pop("sb_refresh_token", None)
+            # Ne détruire le souvenir qu'en cas de jeton explicitement refusé.
+            if "code 400" in str(erreur) or "code 401" in str(erreur):
+                st.session_state.sb_browser_action = "clear"
+            else:
+                st.caption("Reconnexion automatique momentanément indisponible.")
+
+restaurer_connexion_navigateur()
 
 def charger_participations():
     if not st.session_state.get("sb_access_token"):
@@ -729,7 +793,8 @@ with tab5:
         st.info("Ton ancienne V10 et ta sauvegarde CSV restent disponibles.")
     else:
         if not st.session_state.get("sb_access_token"):
-            st.write("Connecte-toi avec le compte personnel créé dans Supabase Authentication.")
+            st.write("Connecte-toi avec ton compte Supabase.")
+            st.caption("Après la connexion, cet appareil pourra te reconnecter automatiquement. Ton mot de passe n'est pas enregistré par l'application.")
             with st.form("connexion_privee", clear_on_submit=True):
                 email = st.text_input("Adresse e-mail", key="sb_email")
                 mot_de_passe = st.text_input("Mot de passe", type="password", key="sb_password")
@@ -750,6 +815,8 @@ with tab5:
             if st.button("Me déconnecter", key="sb_deconnexion"):
                 st.session_state.pop("sb_access_token", None)
                 st.session_state.pop("sb_refresh_token", None)
+                st.session_state.sb_browser_action = "clear"
+                st.session_state.sb_recovery_attempted = True
                 st.rerun()
             try:
                 carnet = charger_participations()
