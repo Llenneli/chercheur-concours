@@ -130,6 +130,23 @@ def sources_regulieres():
 
 
 
+# Liens directs confirmés par l'utilisatrice, associés à leur édition précise.
+LIENS_DIRECTS_VERIFIES = [
+    {
+        "mots": ("festival", "cin", "moustique", "17l11"),
+        "lien": "https://www.moustique.be/concours/2026/11/09/concours-remportez-vos-places-pour-la-26eme-edition-du-cinemamed-clone-PEIKUIGDJFHTRKYXPMFKNBBD6Q/",
+        "fin": date(2026, 11, 17),
+    },
+]
+
+def lien_direct_confirme(concours):
+    titre = concours["titre"].casefold()
+    for entree in LIENS_DIRECTS_VERIFIES:
+        if all(mot in titre for mot in entree["mots"]):
+            return entree
+    return None
+
+
 def liens_sans_erreur(url):
     try:
         return liens_externes_du_sujet(url)
@@ -429,7 +446,15 @@ def afficher_liste_concours():
                 st.write("🟡 Date inconnue : vérifier la fin du concours")
             if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
                 st.caption("Concours récurrent : la date du titre peut concerner une édition passée.")
-            if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
+            lien_confirme = lien_direct_confirme(concours)
+            if lien_confirme:
+                if lien_confirme["fin"] >= aujourdhui:
+                    st.link_button("🌐 Participer directement sur Moustique",
+                                   lien_confirme["lien"], key=f"direct_valide_{i}")
+                    st.caption("Lien fourni pour cette édition du concours, jusqu'au 17/11/2026.")
+                else:
+                    st.caption("Le lien direct connu correspond à une ancienne édition.")
+            elif concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
                 externes = liens_automatiques.get(concours["url"], [])
                 if len(externes) == 1:
                     st.link_button("🌐 Ouvrir le site du concours (lien à vérifier)", externes[0], key=f"externe_{i}")
