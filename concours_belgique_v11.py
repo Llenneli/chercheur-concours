@@ -273,6 +273,11 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 def afficher_liste_concours():
     st.subheader("🔎 Concours ouverts aux Belges")
     st.caption("Source : Fou de Concours — Belgique et étranger accessible aux Belges. Mise à jour automatique toutes les 30 minutes tant que cette page est ouverte.")
+    origine = st.selectbox(
+        "Origine des concours",
+        ["Tous les concours pour les Belges", "Organisés en Belgique", "Organisés à l'étranger"],
+        key="origine_forum"
+    )
     cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
     mots = st.text_input("Filtrer par mot-clé", key="filtre_forum")
     masquer = st.checkbox("Masquer les concours terminés", value=True, key="masquer_expires")
@@ -281,9 +286,20 @@ def afficher_liste_concours():
     liste, erreurs = chercher()
     if erreurs:
         st.warning("Sources temporairement indisponibles : " + ", ".join(erreurs))
+    nb_belges = sum(1 for x in liste if x["source"] == "Fou de Concours — Belgique")
+    nb_etrangers = sum(1 for x in liste if x["source"] == "Fou de Concours — Étranger pour les Belges")
+    st.caption(f"Trouvés sur le forum : {nb_belges} concours belges et {nb_etrangers} concours étrangers accessibles aux Belges (avant filtrage des dates).")
+    if nb_etrangers == 0:
+        st.warning("Aucun concours étranger récupéré pour le moment. La rubrique peut être indisponible.")
+        st.link_button("Voir la rubrique étrangère sur le forum",
+            "https://www.foudeconcours.com/forum/concours/concours-%C3%A3%C2%A9trangers-pour-les-belges")
     aujourdhui = date.today()
     affichables = []
     for concours in liste:
+        if origine == "Organisés en Belgique" and concours["source"] != "Fou de Concours — Belgique":
+            continue
+        if origine == "Organisés à l'étranger" and concours["source"] != "Fou de Concours — Étranger pour les Belges":
+            continue
         limite = concours.get("limite_calculee")
         if masquer and limite and limite < aujourdhui:
             continue
