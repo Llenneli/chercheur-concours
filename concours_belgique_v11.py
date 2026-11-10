@@ -353,6 +353,29 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 )
 
 
+def statut_deja_joue(concours, historique, aujourdhui):
+    """Réinitialise l'indicateur des concours journaliers et mensuels à chaque période."""
+    uri = concours["url"].rstrip("/").casefold()
+    titre = concours["titre"].strip().casefold()
+    periodique = concours["source"]
+    for participation in historique:
+        p_uri = str(participation.get("url") or "").rstrip("/").casefold()
+        p_titre = str(participation.get("concours") or "").strip().casefold()
+        if not ((uri and p_uri == uri) or (titre and p_titre == titre)):
+            continue
+        if periodique.endswith("Journaliers") or periodique.endswith("Mensuels"):
+            try:
+                jour_joue = date.fromisoformat(str(participation.get("date_participation") or "")[:10])
+            except ValueError:
+                continue
+            if periodique.endswith("Journaliers") and jour_joue != aujourdhui:
+                continue
+            if periodique.endswith("Mensuels") and (jour_joue.year, jour_joue.month) != (aujourdhui.year, aujourdhui.month):
+                continue
+        return True
+    return False
+
+
 @st.fragment(run_every="30m")
 def afficher_liste_concours():
     st.subheader("🔎 Concours ouverts aux Belges")
@@ -366,6 +389,18 @@ def afficher_liste_concours():
     cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
     mots = st.text_input("Filtrer par mot-clé", key="filtre_forum")
     masquer = st.checkbox("Masquer les concours terminés", value=True, key="masquer_expires")
+    masquer_joues = st.checkbox("Masquer les concours déjà joués", value=False, key="masquer_deja_joues")
+    connecte = bool(st.session_state.get("sb_access_token"))
+    historique = []
+    historique_ok = False
+    if connecte:
+        try:
+            historique = charger_participations()
+            historique_ok = True
+        except RuntimeError as erreur:
+            st.warning("Le suivi des concours joués est indisponible : " + str(erreur))
+    else:
+        st.info("Pour enregistrer et retrouver les concours déjà joués, connecte-toi d'abord dans l'onglet 📒 Participations.")
     if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
         chercher_foudeconcours.clear()
     liste, erreurs = chercher()
@@ -409,6 +444,8 @@ def afficher_liste_concours():
             continue
         if mots and mots.casefold() not in concours["titre"].casefold():
             continue
+        if masquer_joues and historique_ok and statut_deja_joue(concours, historique, aujourdhui):
+            continue
         affichables.append(concours)
     st.write(f"**{len(affichables)} concours affiché(s)**")
     taille_page = 12
@@ -436,6 +473,32 @@ def afficher_liste_concours():
         with st.container(border=True):
             st.write("**" + concours["titre"] + "**")
             st.caption(concours["categorie"] + " — " + concours["source"])
+            if historique_ok:
+                deja_joue = statut_deja_joue(concours, historique, aujourdhui)
+                if deja_joue:
+                    if concours["source"].endswith("Journaliers"):
+                        st.success("✅ Déjà joué aujourd'hui")
+                    elif concours["source"].endswith("Mensuels"):
+                        st.success("✅ Déjà joué ce mois-ci")
+                    else:
+                        st.success("✅ Déjà participé")
+                else:
+                    if st.button("✅ Marquer comme joué", key=f"marquer_joue_{i}"):
+                        ligne = {
+                            "concours": concours["titre"],
+                            "url": concours["url"],
+                            "source": concours["source"],
+                            "date_participation": aujourdhui.isoformat(),
+                            "nombre_envoye": "",
+                            "question_subsidiaire": "",
+                            "notes": "Marqué comme joué depuis la recherche",
+                        }
+                        try:
+                            sauvegarder_participation(ligne)
+                            st.success("Participation enregistrée dans ton carnet !")
+                            st.rerun(scope="fragment")
+                        except RuntimeError as erreur:
+                            st.error("Enregistrement impossible : " + str(erreur))
             limite = concours.get("limite_calculee")
             if limite:
                 st.write("📅 Date du titre :", limite.strftime("%d/%m/%Y"))
@@ -476,6 +539,7 @@ def afficher_liste_concours():
                     if not externes:
                         st.info("Pas de lien direct accessible automatiquement pour ce concours.")
             st.link_button("Voir la discussion sur Fou de Concours", concours["url"], key=f"fdc_{i}")
+    st.caption("Le bouton « Marquer comme joué » enregistre la participation sans numéro subsidiaire. Pour conserver le nombre envoyé, utilise plutôt l'onglet 🎯 Estimation. Les concours journaliers redeviennent disponibles le lendemain et les mensuels le mois suivant.")
     st.caption("Les concours sans date lisible restent visibles. Ton historique de participations n'est jamais supprimé par ce filtre.")
 
 with tab1:
