@@ -117,6 +117,71 @@ FDC_SECTIONS = [
      "https://www.foudeconcours.com/forum/concours/concours-%C3%A3%C2%A9trangers-pour-les-belges"),
 ]
 
+@st.cache_data(ttl=1800)
+def sources_regulieres():
+    """Découvre les adresses des sous-forums directement sur Fou de Concours."""
+    rubrique = "https://www.foudeconcours.com/forum/concours/concours-r%C3%A3%C2%A9guliers"
+    try:
+        parent = lire(rubrique)
+    except Exception:
+        return [], ["Concours journaliers / mensuels : rubrique inaccessible"]
+    sources = []
+    for periodicite, morceau in [
+        ("Journaliers", "concours-journaliers"),
+        ("Mensuels", "concours-mensuels"),
+    ]:
+        trouve = None
+        for a in parent.liens:
+            lien = urljoin(rubrique, a["url"])
+            analyse = urlparse(lien)
+            if analyse.hostname not in ("www.foudeconcours.com", "foudeconcours.com"):
+                continue
+            if "/concours-r" in analyse.path and analyse.path.rstrip("/").endswith("/" + morceau):
+                trouve = lien
+                break
+        if trouve:
+            sources.append(("Fou de Concours — " + periodicite, trouve))
+    erreurs = []
+    for periodicite in ("Journaliers", "Mensuels"):
+        if not any(x[0].endswith(periodicite) for x in sources):
+            erreurs.append("Rubrique " + periodicite.lower() + " introuvable")
+    return sources, erreurs
+
+
+@st.cache_data(ttl=3600)
+def liens_externes_du_sujet(url):
+    """Propose les liens externes trouvés sur le sujet, jamais un lien inventé."""
+    page = lire(url)
+    candidats = []
+    domaines_refuses = (
+        "foudeconcours.com", "google.com", "google.be", "facebook.com",
+        "instagram.com", "x.com", "twitter.com", "youtube.com",
+        "youtu.be", "tiktok.com", "pinterest.com",
+    )
+    mots_ignores = ("connexion", "inscription au forum", "se connecter",
+                    "règlement du forum", "signaler", "profil", "partager")
+    for lien_info in page.liens:
+        destination = urljoin(url, lien_info["url"])
+        analyse = urlparse(destination)
+        domaine = (analyse.hostname or "").lower()
+        if analyse.scheme not in ("https", "http") or not domaine:
+            continue
+        if domaine.startswith("www."):
+            domaine = domaine[4:]
+        if any(domaine == bloque or domaine.endswith("." + bloque) for bloque in domaines_refuses):
+            continue
+        if destination.lower().split("?")[0].endswith(
+            (".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".svg")
+        ):
+            continue
+        libelle = " ".join(lien_info["titre"].split())
+        if any(mot in libelle.casefold() for mot in mots_ignores):
+            continue
+        if destination not in candidats:
+            candidats.append(destination)
+    return candidats[:6]
+
+
 def date_limite_du_titre(titre):
     """Lit les dates du titre sans inventer l'année lorsqu'elle est absente."""
     texte = date_dans_titre(titre)
@@ -142,10 +207,11 @@ def date_limite_du_titre(titre):
 def chercher_foudeconcours():
     resultats, erreurs = [], []
     vus = set()
-    for source, adresse in FDC_SECTIONS:
+    regulieres, erreurs_regulieres = sources_regulieres()
+    erreurs.extend(erreurs_regulieres)
+    for source, adresse in FDC_SECTIONS + regulieres:
         try:
             page = lire(adresse)
-            prefixe = urlparse(adresse).path.rstrip("/") + "/"
             for a in page.liens:
                 titre = " ".join(a["titre"].split())
                 lien = urljoin(adresse, a["url"])
@@ -155,8 +221,12 @@ def chercher_foudeconcours():
                 chemin_lu = unquote(unquote(path)).casefold()
                 if source == "Fou de Concours — Belgique":
                     bonne_rubrique = "concours-belges-pour-les-belges/" in chemin_lu
-                else:
+                elif source == "Fou de Concours — Étranger pour les Belges":
                     bonne_rubrique = "trangers-pour-les-belges/" in chemin_lu
+                elif source.endswith("Journaliers"):
+                    bonne_rubrique = "/concours-journaliers/" in chemin_lu
+                else:
+                    bonne_rubrique = "/concours-mensuels/" in chemin_lu
                 if not bonne_rubrique:
                     continue
                 reste = chemin_lu.rsplit("/", 1)[-1]
@@ -280,10 +350,11 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 @st.fragment(run_every="30m")
 def afficher_liste_concours():
     st.subheader("🔎 Concours ouverts aux Belges")
-    st.caption("Source : Fou de Concours — Belgique et étranger accessible aux Belges. Mise à jour automatique toutes les 30 minutes tant que cette page est ouverte.")
+    st.caption("Source : Fou de Concours — Belgique, étranger pour les Belges, journaliers et mensuels. Mise à jour toutes les 30 minutes tant que la page est ouverte.")
     origine = st.selectbox(
         "Origine des concours",
-        ["Tous les concours pour les Belges", "Organisés en Belgique", "Organisés à l'étranger"],
+        ["Tous les concours pour les Belges", "Organisés en Belgique", "Organisés à l'étranger",
+         "Journaliers", "Mensuels"],
         key="origine_forum"
     )
     cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
@@ -296,7 +367,12 @@ def afficher_liste_concours():
         st.warning("Sources temporairement indisponibles : " + ", ".join(erreurs))
     nb_belges = sum(1 for x in liste if x["source"] == "Fou de Concours — Belgique")
     nb_etrangers = sum(1 for x in liste if x["source"] == "Fou de Concours — Étranger pour les Belges")
-    st.caption(f"Trouvés sur le forum : {nb_belges} concours belges et {nb_etrangers} concours étrangers accessibles aux Belges (avant filtrage des dates).")
+    nb_journaliers = sum(1 for x in liste if x["source"] == "Fou de Concours — Journaliers")
+    nb_mensuels = sum(1 for x in liste if x["source"] == "Fou de Concours — Mensuels")
+    st.caption(
+        f"Trouvés sur le forum : {nb_belges} belges, {nb_etrangers} étrangers pour les Belges, "
+        f"{nb_journaliers} journaliers et {nb_mensuels} mensuels (avant filtrage des dates)."
+    )
     if nb_etrangers == 0:
         st.warning("Aucun concours étranger récupéré pour le moment. La rubrique peut être indisponible.")
         st.link_button("Voir la rubrique étrangère sur le forum",
@@ -308,8 +384,14 @@ def afficher_liste_concours():
             continue
         if origine == "Organisés à l'étranger" and concours["source"] != "Fou de Concours — Étranger pour les Belges":
             continue
+        if origine == "Journaliers" and concours["source"] != "Fou de Concours — Journaliers":
+            continue
+        if origine == "Mensuels" and concours["source"] != "Fou de Concours — Mensuels":
+            continue
         limite = concours.get("limite_calculee")
-        if masquer and limite and limite < aujourdhui:
+        if masquer and limite and limite < aujourdhui and concours["source"] not in (
+            "Fou de Concours — Journaliers", "Fou de Concours — Mensuels"
+        ):
             continue
         if cat != "Toutes" and concours["categorie"] != cat:
             continue
@@ -329,7 +411,23 @@ def afficher_liste_concours():
                     st.write("🔴 Date dépassée")
             else:
                 st.write("🟡 Date inconnue : vérifier la fin du concours")
-            st.link_button("Voir le concours", concours["url"], key=f"fdc_{i}")
+            if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
+                st.caption("Concours récurrent : la date du titre peut concerner une édition passée.")
+            if st.button("🔗 Chercher le lien direct", key=f"direct_{i}"):
+                st.session_state["lien_ouvert_forum"] = concours["url"]
+            if st.session_state.get("lien_ouvert_forum") == concours["url"]:
+                try:
+                    externes = liens_externes_du_sujet(concours["url"])
+                    if externes:
+                        st.write("Liens externes trouvés dans la discussion :")
+                        for j, externe in enumerate(externes):
+                            st.link_button("Ouvrir le site " + str(j + 1), externe, key=f"externe_{i}_{j}")
+                        st.caption("Vérifie qu'il s'agit bien de la page de participation. Certains liens peuvent être des sites partenaires.")
+                    else:
+                        st.info("Pas de lien direct accessible automatiquement pour ce concours.")
+                except Exception:
+                    st.warning("Impossible de lire la discussion pour retrouver un lien direct.")
+            st.link_button("Voir la discussion sur Fou de Concours", concours["url"], key=f"fdc_{i}")
     st.caption("Les concours sans date lisible restent visibles. Ton historique de participations n'est jamais supprimé par ce filtre.")
 
 with tab1:
