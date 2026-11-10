@@ -10,13 +10,8 @@ import json
 from urllib.error import HTTPError, URLError
 
 st.set_page_config(page_title="Concours Belgique V11", page_icon="🏆")
-st.title("🏆 Mon chercheur de concours belges")
+st.title("🏆 Fou de Concours — pour les Belges")
 
-SOURCES = [
-    ("Concours Belgique", "https://www.echantillonsgratuits.be/concours-belgique", ""),
-    ("Voyages Belgique", "https://www.echantillonsgratuits.be/concours-belgique/concours-voyages", "Voyages"),
-    ("Mitspiel Voyages", "https://mitspiel.be/gagner-un-voyage", "Voyages")
-]
 CATEGORIES = ["Toutes", "Voyages", "Voitures", "Argent",
               "High-tech", "Alimentation", "Beauté", "Maison",
               "Culture", "Divers"]
@@ -118,9 +113,32 @@ def date_dans_titre(titre):
 FDC_SECTIONS = [
     ("Fou de Concours — Belgique",
      "https://www.foudeconcours.com/forum/concours/concours-belges-pour-les-belges"),
+    ("Fou de Concours — Étranger pour les Belges",
+     "https://www.foudeconcours.com/forum/concours/concours-%C3%A3%C2%A9trangers-pour-les-belges"),
 ]
 
-@st.cache_data(ttl=3600)
+def date_limite_du_titre(titre):
+    """Lit les dates du titre sans inventer l'année lorsqu'elle est absente."""
+    texte = date_dans_titre(titre)
+    if not texte:
+        return None
+    parties = [int(x) for x in texte.split("/")]
+    jour, mois = parties[:2]
+    aujourd_hui = date.today()
+    if len(parties) == 3:
+        annee = parties[2]
+    else:
+        annee = aujourd_hui.year
+        # Un concours annoncé en fin d'année peut terminer en janvier/février.
+        if aujourd_hui.month >= 10 and mois <= 3:
+            annee += 1
+    try:
+        return date(annee, mois, jour)
+    except ValueError:
+        return None
+
+
+@st.cache_data(ttl=1800)
 def chercher_foudeconcours():
     resultats, erreurs = [], []
     vus = set()
@@ -145,43 +163,15 @@ def chercher_foudeconcours():
                     "source": source,
                     "date_non_confirmee": True,
                     "date_titre": date_dans_titre(titre),
+                    "limite_calculee": date_limite_du_titre(titre),
                 })
         except Exception:
             erreurs.append(source)
     return resultats[:60], erreurs
 
-@st.cache_data(ttl=3600)
 def chercher():
-    liste, erreurs, vus = [], [], set()
-    for source, adresse, cat in SOURCES:
-        try:
-            page = lire(adresse)
-            for a in page.liens:
-                titre = " ".join(a["titre"].split())
-                lien = urljoin(adresse, a["url"])
-                chemin = urlparse(lien).path.lower()
-                if not 15 <= len(titre) <= 190:
-                    continue
-                if "echantillonsgratuits" in adresse:
-                    if "/concours-belgique/" not in chemin:
-                        continue
-                    if chemin.endswith("/concours-voyages"):
-                        continue
-                elif "/concours/" not in chemin:
-                    continue
-                if not re.search("gagnez|gagner|concours|remportez|séjour|voyage", titre, re.I):
-                    continue
-                if lien in vus:
-                    continue
-                vus.add(lien)
-                liste.append({"titre": titre, "url": lien,
-                              "categorie": categorie(titre, cat),
-                              "source": source})
-        except Exception:
-            erreurs.append(source)
-    forum, erreurs_forum = chercher_foudeconcours()
-    liste.extend(c for c in forum if c["url"] not in {x["url"] for x in liste})
-    return liste[:140], erreurs + erreurs_forum
+    # Fou de Concours uniquement, y compris les concours étrangers ouverts aux Belges.
+    return chercher_foudeconcours()
 
 @st.cache_data(ttl=3600)
 def date_concours(url):
@@ -278,40 +268,48 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["🔎 Recherche", "🔗 Mes concours", "💡 Réponses", "🎯 Estimation", "📒 Participations"]
 )
 
-with tab1:
-    st.subheader("Concours belges, Fou de Concours et dates limites")
-    st.caption("Fou de Concours est un forum : les dates et l’accès aux discussions peuvent nécessiter une vérification.")
-    cat = st.selectbox("Catégorie", CATEGORIES)
-    mots = st.text_input("Filtrer par mot-clé")
-    filtre = st.checkbox("Masquer les concours expirés", value=True)
-    if st.button("🔄 Actualiser"):
-        chercher.clear()
+
+@st.fragment(run_every="30m")
+def afficher_liste_concours():
+    st.subheader("🔎 Concours ouverts aux Belges")
+    st.caption("Source : Fou de Concours — Belgique et étranger accessible aux Belges. Mise à jour automatique toutes les 30 minutes tant que cette page est ouverte.")
+    cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
+    mots = st.text_input("Filtrer par mot-clé", key="filtre_forum")
+    masquer = st.checkbox("Masquer les concours terminés", value=True, key="masquer_expires")
+    if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
         chercher_foudeconcours.clear()
-        date_concours.clear()
     liste, erreurs = chercher()
-    liste = [c for c in liste if
-             (cat == "Toutes" or c["categorie"] == cat)
-             and (not mots or mots.lower() in c["titre"].lower())]
     if erreurs:
-        st.warning("Sources indisponibles : " + ", ".join(erreurs))
-    st.write(len(liste), "concours à examiner")
-    for i, c in enumerate(liste):
+        st.warning("Sources temporairement indisponibles : " + ", ".join(erreurs))
+    aujourdhui = date.today()
+    affichables = []
+    for concours in liste:
+        limite = concours.get("limite_calculee")
+        if masquer and limite and limite < aujourdhui:
+            continue
+        if cat != "Toutes" and concours["categorie"] != cat:
+            continue
+        if mots and mots.casefold() not in concours["titre"].casefold():
+            continue
+        affichables.append(concours)
+    st.write(f"**{len(affichables)} concours affiché(s)**")
+    for i, concours in enumerate(affichables):
         with st.container(border=True):
-            limite = None if c.get("date_non_confirmee") else date_concours(c["url"])
-            if filtre and limite and limite < date.today():
-                continue
-            st.write("**" + c["titre"] + "**")
-            st.caption(c["categorie"] + " — " + c["source"])
+            st.write("**" + concours["titre"] + "**")
+            st.caption(concours["categorie"] + " — " + concours["source"])
+            limite = concours.get("limite_calculee")
             if limite:
-                st.write("📅 Date limite :", limite.strftime("%d/%m/%Y"))
-                st.write("🟢 Date non dépassée" if limite >= date.today() else "🔴 Date dépassée")
+                st.write("📅 Date du titre :", limite.strftime("%d/%m/%Y"))
+                st.caption("Date déduite du titre du forum : vérifier le règlement, surtout si l'année n'est pas indiquée.")
+                if limite < aujourdhui:
+                    st.write("🔴 Date dépassée")
             else:
-                if c.get("date_titre"):
-                    st.write("📅 Date dans le titre : " + c["date_titre"] + " — à confirmer dans le règlement")
-                else:
-                    st.write("🟡 Date à vérifier" + (" (forum : vérifier dans le règlement)" if c.get("date_non_confirmee") else ""))
-            st.link_button("Voir le concours", c["url"], key=f"lien_{i}")
-    st.caption("Une date non dépassée ne garantit pas que le concours est encore ouvert. Vérifie le règlement.")
+                st.write("🟡 Date inconnue : vérifier la fin du concours")
+            st.link_button("Voir le concours", concours["url"], key=f"fdc_{i}")
+    st.caption("Les concours sans date lisible restent visibles. Ton historique de participations n'est jamais supprimé par ce filtre.")
+
+with tab1:
+    afficher_liste_concours()
 
 with tab2:
     st.subheader("Ajouter mes concours")
