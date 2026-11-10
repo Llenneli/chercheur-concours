@@ -120,33 +120,14 @@ FDC_SECTIONS = [
 
 @st.cache_data(ttl=1800)
 def sources_regulieres():
-    """Découvre les adresses des sous-forums directement sur Fou de Concours."""
-    rubrique = "https://www.foudeconcours.com/forum/concours/concours-r%C3%A3%C2%A9guliers"
-    try:
-        parent = lire(rubrique)
-    except Exception:
-        return [], ["Concours journaliers / mensuels : rubrique inaccessible"]
-    sources = []
-    for periodicite, morceau in [
-        ("Journaliers", "concours-journaliers"),
-        ("Mensuels", "concours-mensuels"),
-    ]:
-        trouve = None
-        for a in parent.liens:
-            lien = urljoin(rubrique, a["url"])
-            analyse = urlparse(lien)
-            if analyse.hostname not in ("www.foudeconcours.com", "foudeconcours.com"):
-                continue
-            if "/concours-r" in analyse.path and analyse.path.rstrip("/").endswith("/" + morceau):
-                trouve = lien
-                break
-        if trouve:
-            sources.append(("Fou de Concours — " + periodicite, trouve))
-    erreurs = []
-    for periodicite in ("Journaliers", "Mensuels"):
-        if not any(x[0].endswith(periodicite) for x in sources):
-            erreurs.append("Rubrique " + periodicite.lower() + " introuvable")
-    return sources, erreurs
+    """Adresses publiques des rubriques périodiques, sans étape de découverte."""
+    base = "https://www.foudeconcours.com/forum/concours/concours-r%C3%A3%C2%A9guliers"
+    sources = [
+        ("Fou de Concours — Journaliers", base + "/concours-journaliers"),
+        ("Fou de Concours — Mensuels", base + "/concours-mensuels"),
+    ]
+    return sources, []
+
 
 
 def liens_sans_erreur(url):
@@ -372,7 +353,13 @@ def afficher_liste_concours():
         chercher_foudeconcours.clear()
     liste, erreurs = chercher()
     if erreurs:
-        st.warning("Sources temporairement indisponibles : " + ", ".join(erreurs))
+        st.warning("Certaines rubriques n'ont pas pu être lues automatiquement : " + ", ".join(erreurs))
+        if "Fou de Concours — Journaliers" in erreurs:
+            st.link_button("Consulter les journaliers sur le forum",
+                "https://www.foudeconcours.com/forum/concours/concours-r%C3%A3%C2%A9guliers/concours-journaliers")
+        if "Fou de Concours — Mensuels" in erreurs:
+            st.link_button("Consulter les mensuels sur le forum",
+                "https://www.foudeconcours.com/forum/concours/concours-r%C3%A3%C2%A9guliers/concours-mensuels")
     nb_belges = sum(1 for x in liste if x["source"] == "Fou de Concours — Belgique")
     nb_etrangers = sum(1 for x in liste if x["source"] == "Fou de Concours — Étranger pour les Belges")
     nb_journaliers = sum(1 for x in liste if x["source"] == "Fou de Concours — Journaliers")
