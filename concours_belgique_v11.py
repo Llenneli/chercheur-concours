@@ -7,6 +7,7 @@ import re
 import csv
 import io
 import json
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError, URLError
 
 st.set_page_config(page_title="Concours Belgique V11", page_icon="🏆")
@@ -146,6 +147,13 @@ def sources_regulieres():
         if not any(x[0].endswith(periodicite) for x in sources):
             erreurs.append("Rubrique " + periodicite.lower() + " introuvable")
     return sources, erreurs
+
+
+def liens_sans_erreur(url):
+    try:
+        return liens_externes_du_sujet(url)
+    except Exception:
+        return []
 
 
 @st.cache_data(ttl=3600)
@@ -399,7 +407,28 @@ def afficher_liste_concours():
             continue
         affichables.append(concours)
     st.write(f"**{len(affichables)} concours affiché(s)**")
-    for i, concours in enumerate(affichables):
+    taille_page = 12
+    pages = max(1, (len(affichables) + taille_page - 1) // taille_page)
+    numero_page = st.selectbox(
+        "Page des concours", range(1, pages + 1),
+        format_func=lambda n: f"Page {n} sur {pages}",
+        key="page_concours"
+    )
+    debut_page = (numero_page - 1) * taille_page
+    a_afficher = affichables[debut_page:debut_page + taille_page]
+    urls_regulieres = [
+        concours["url"] for concours in a_afficher
+        if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels")
+    ]
+    liens_automatiques = {}
+    if urls_regulieres:
+        # Charger en parallèle et mettre en cache les liens de ces sujets.
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            trouves = list(pool.map(
+                lambda url: liens_sans_erreur(url), urls_regulieres
+            ))
+        liens_automatiques = dict(zip(urls_regulieres, trouves))
+    for i, concours in enumerate(a_afficher, start=debut_page):
         with st.container(border=True):
             st.write("**" + concours["titre"] + "**")
             st.caption(concours["categorie"] + " — " + concours["source"])
@@ -413,20 +442,27 @@ def afficher_liste_concours():
                 st.write("🟡 Date inconnue : vérifier la fin du concours")
             if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
                 st.caption("Concours récurrent : la date du titre peut concerner une édition passée.")
-            if st.button("🔗 Chercher le lien direct", key=f"direct_{i}"):
-                st.session_state["lien_ouvert_forum"] = concours["url"]
-            if st.session_state.get("lien_ouvert_forum") == concours["url"]:
-                try:
-                    externes = liens_externes_du_sujet(concours["url"])
-                    if externes:
-                        st.write("Liens externes trouvés dans la discussion :")
-                        for j, externe in enumerate(externes):
-                            st.link_button("Ouvrir le site " + str(j + 1), externe, key=f"externe_{i}_{j}")
-                        st.caption("Vérifie qu'il s'agit bien de la page de participation. Certains liens peuvent être des sites partenaires.")
-                    else:
+            if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
+                externes = liens_automatiques.get(concours["url"], [])
+                if len(externes) == 1:
+                    st.link_button("🌐 Ouvrir le site du concours (lien à vérifier)", externes[0], key=f"externe_{i}")
+                elif len(externes) > 1:
+                    st.caption("Plusieurs sites externes repérés dans la discussion :")
+                    for j, externe in enumerate(externes):
+                        domaine = urlparse(externe).hostname or "Site externe"
+                        st.link_button("🌐 " + domaine, externe, key=f"externe_{i}_{j}")
+                else:
+                    st.caption("Lien direct non trouvé automatiquement.")
+                st.caption("Vérifie que le lien mène bien au concours actif de ce jour ou de ce mois.")
+            else:
+                if st.button("🔗 Chercher le lien direct", key=f"direct_{i}"):
+                    st.session_state["lien_ouvert_forum"] = concours["url"]
+                if st.session_state.get("lien_ouvert_forum") == concours["url"]:
+                    externes = liens_sans_erreur(concours["url"])
+                    for j, externe in enumerate(externes):
+                        st.link_button("Ouvrir le site " + str(j + 1), externe, key=f"externe_{i}_{j}")
+                    if not externes:
                         st.info("Pas de lien direct accessible automatiquement pour ce concours.")
-                except Exception:
-                    st.warning("Impossible de lire la discussion pour retrouver un lien direct.")
             st.link_button("Voir la discussion sur Fou de Concours", concours["url"], key=f"fdc_{i}")
     st.caption("Les concours sans date lisible restent visibles. Ton historique de participations n'est jamais supprimé par ce filtre.")
 
