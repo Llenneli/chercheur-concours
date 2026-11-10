@@ -369,18 +369,19 @@ def restaurer_connexion_navigateur():
             "concours_belgique_memoire_connexion", js=STOCKAGE_CONNEXION_JS
         )
     except AttributeError:
-        # Version de Streamlit trop ancienne pour les composants v2.
+        st.caption("La mémorisation nécessite une version récente de Streamlit.")
         return
 
     action = st.session_state.get("sb_browser_action", "read")
+    jeton = (st.session_state.get("sb_refresh_token", "") if action == "save" else "")
+    # Un composant Streamlit v2 n'exécute son JavaScript qu'au montage.
+    # Changer de key lors d'une sauvegarde ou déconnexion force ce montage.
+    import hashlib
+    empreinte = hashlib.sha256(jeton.encode("utf-8")).hexdigest()[:16] if jeton else ""
+    cle_composant = "sb_memoire_navigateur_" + action + "_" + empreinte
     resultat = composant(
-        key="sb_memoire_navigateur",
-        data={
-            "action": action,
-            "refresh_token": (
-                st.session_state.get("sb_refresh_token", "") if action == "save" else ""
-            ),
-        },
+        key=cle_composant,
+        data={"action": action, "refresh_token": jeton},
         on_refresh_token_change=lambda: None,
     )
     if (action == "read" and not st.session_state.get("sb_access_token")
@@ -394,7 +395,6 @@ def restaurer_connexion_navigateur():
         except RuntimeError as erreur:
             st.session_state.pop("sb_access_token", None)
             st.session_state.pop("sb_refresh_token", None)
-            # Ne détruire le souvenir qu'en cas de jeton explicitement refusé.
             if "code 400" in str(erreur) or "code 401" in str(erreur):
                 st.session_state.sb_browser_action = "clear"
             else:
