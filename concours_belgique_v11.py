@@ -576,18 +576,17 @@ def afficher_liste_concours():
     )
     debut_page = (numero_page - 1) * taille_page
     a_afficher = affichables[debut_page:debut_page + taille_page]
-    urls_regulieres = [
+    # Chercher les liens externes pour tous les concours visibles de la page.
+    # Le cache évite de relire chaque discussion à chaque interaction.
+    urls_a_verifier = [
         concours["url"] for concours in a_afficher
-        if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels")
+        if not lien_direct_confirme(concours)
     ]
     liens_automatiques = {}
-    if urls_regulieres:
-        # Charger en parallèle et mettre en cache les liens de ces sujets.
+    if urls_a_verifier:
         with ThreadPoolExecutor(max_workers=6) as pool:
-            trouves = list(pool.map(
-                lambda url: liens_sans_erreur(url), urls_regulieres
-            ))
-        liens_automatiques = dict(zip(urls_regulieres, trouves))
+            trouves = list(pool.map(liens_sans_erreur, urls_a_verifier))
+        liens_automatiques = dict(zip(urls_a_verifier, trouves))
     for i, concours in enumerate(a_afficher, start=debut_page):
         with st.container(border=True):
             st.write("**" + concours["titre"] + "**")
@@ -655,27 +654,20 @@ def afficher_liste_concours():
                     st.caption("Lien fourni pour cette édition du concours, jusqu'au 17/11/2026.")
                 else:
                     st.caption("Le lien direct connu correspond à une ancienne édition.")
-            elif concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
+            else:
                 externes = liens_automatiques.get(concours["url"], [])
                 if len(externes) == 1:
-                    st.link_button("🌐 Ouvrir le site du concours (lien à vérifier)", externes[0], key=f"externe_{i}")
+                    st.link_button("🌐 Ouvrir le site du concours (à vérifier)",
+                                   externes[0], key=f"externe_{i}")
                 elif len(externes) > 1:
-                    st.caption("Plusieurs sites externes repérés dans la discussion :")
+                    st.caption("🔗 Plusieurs liens trouvés dans la discussion :")
                     for j, externe in enumerate(externes):
                         domaine = urlparse(externe).hostname or "Site externe"
-                        st.link_button("🌐 " + domaine, externe, key=f"externe_{i}_{j}")
+                        st.link_button("🌐 " + domaine + " (à vérifier)", externe,
+                                       key=f"externe_{i}_{j}")
                 else:
-                    st.caption("Lien direct non trouvé automatiquement.")
-                st.caption("Vérifie que le lien mène bien au concours actif de ce jour ou de ce mois.")
-            else:
-                if st.button("🔗 Chercher le lien direct", key=f"direct_{i}"):
-                    st.session_state["lien_ouvert_forum"] = concours["url"]
-                if st.session_state.get("lien_ouvert_forum") == concours["url"]:
-                    externes = liens_sans_erreur(concours["url"])
-                    for j, externe in enumerate(externes):
-                        st.link_button("Ouvrir le site " + str(j + 1), externe, key=f"externe_{i}_{j}")
-                    if not externes:
-                        st.info("Pas de lien direct accessible automatiquement pour ce concours.")
+                    st.caption("🔎 Aucun lien direct accessible automatiquement pour ce concours.")
+                st.caption("Vérifie la page du concours et ses conditions avant de participer.")
             st.link_button("Voir la discussion sur Fou de Concours", concours["url"], key=f"fdc_{i}")
     st.caption("Le bouton « Marquer comme joué » enregistre la participation sans numéro subsidiaire. Pour conserver le nombre envoyé, utilise plutôt l'onglet 🎯 Estimation. Les concours journaliers redeviennent disponibles le lendemain et les mensuels le mois suivant.")
     st.caption("Les concours sans date lisible restent visibles. Ton historique de participations n'est jamais supprimé par ce filtre.")
