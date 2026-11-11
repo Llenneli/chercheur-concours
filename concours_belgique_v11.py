@@ -459,12 +459,24 @@ def lire_concours_favoris():
 
 
 def enregistrer_concours_favoris(favoris):
-    """Sauvegarder uniquement la préférence favoris, sans modifier le carnet."""
+    """Confirme que Supabase a bien mémorisé les favoris avant d'annoncer le succès."""
     if not st.session_state.get("sb_access_token"):
         raise RuntimeError("Connecte-toi dans 📒 Participations pour gérer tes favoris.")
-    requete_supabase("/auth/v1/user", "PUT", {
+    reponse = requete_supabase("/auth/v1/user", "PUT", {
         "data": {"concours_favoris_v11": list(favoris.values())}
     })
+    # L'API peut répondre sans renvoyer le champ modifié. Relire alors le profil.
+    confirme = (reponse or {}).get("user_metadata", {}).get("concours_favoris_v11")
+    if confirme is None:
+        profil = requete_supabase("/auth/v1/user")
+        confirme = (profil or {}).get("user_metadata", {}).get("concours_favoris_v11")
+    if not isinstance(confirme, list) or {
+        item.get("url") for item in confirme if isinstance(item, dict)
+    } != set(favoris):
+        raise RuntimeError("Supabase n'a pas confirmé l'enregistrement. Réessaie.")
+    st.session_state.concours_favoris_v11 = dict(favoris)
+    st.session_state.concours_favoris_confirmation = "⭐ Favoris enregistrés dans ton compte."
+
 
 
 def charger_participations():
@@ -541,7 +553,8 @@ def afficher_liste_concours():
         except RuntimeError:
             st.caption("Impossible de retrouver pour le moment les concours masqués.")
         try:
-            favoris = lire_concours_favoris()
+            favoris_distants = lire_concours_favoris()
+            favoris = favoris_distants
             st.session_state.concours_favoris_v11 = favoris
             favoris_ok = True
         except RuntimeError:
@@ -551,6 +564,9 @@ def afficher_liste_concours():
     if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
         chercher_foudeconcours.clear()
     liste, erreurs = chercher()
+    confirmation_favoris = st.session_state.pop("concours_favoris_confirmation", "")
+    if confirmation_favoris:
+        st.success(confirmation_favoris)
     if connecte and favoris_ok:
         with st.expander(f"⭐ Mes favoris ({len(favoris)})"):
             if favoris:
@@ -651,7 +667,6 @@ def afficher_liste_concours():
                             nouveaux_favoris = dict(favoris)
                             nouveaux_favoris.pop(url_favori, None)
                             enregistrer_concours_favoris(nouveaux_favoris)
-                            st.session_state.concours_favoris_v11 = nouveaux_favoris
                             st.rerun(scope="fragment")
                         except RuntimeError as erreur:
                             st.error("Favori non modifié : " + str(erreur))
@@ -664,7 +679,6 @@ def afficher_liste_concours():
                             "source": concours["source"],
                         }
                         enregistrer_concours_favoris(nouveaux_favoris)
-                        st.session_state.concours_favoris_v11 = nouveaux_favoris
                         st.rerun(scope="fragment")
                     except RuntimeError as erreur:
                         st.error("Favori non enregistré : " + str(erreur))
