@@ -670,10 +670,10 @@ def afficher_liste_concours():
                             nouveaux_favoris = dict(favoris)
                             nouveaux_favoris.pop(url_favori, None)
                             enregistrer_concours_favoris(nouveaux_favoris)
-                            st.session_state.concours_favoris_confirmation = "✅ Favori retiré."
-                            st.rerun()  # Recharger aussi l'onglet ⭐ Favoris
-                        except RuntimeError as erreur:
-                            st.error("Favori non modifié : " + str(erreur))
+                            favoris = nouveaux_favoris
+                            st.success("✅ Ce concours a été retiré des favoris.")
+                        except Exception as erreur:
+                            st.error("Impossible de retirer ce favori : " + str(erreur))
                 elif st.button("☆ Ajouter aux favoris", key=f"ajouter_favori_{i}"):
                     try:
                         nouveaux_favoris = dict(favoris)
@@ -683,10 +683,10 @@ def afficher_liste_concours():
                             "source": concours["source"],
                         }
                         enregistrer_concours_favoris(nouveaux_favoris)
-                        st.session_state.concours_favoris_confirmation = "✅ Ajouté aux favoris ! Ouvre l'onglet ⭐ Favoris."
-                        st.rerun()  # Recharger aussi l'onglet ⭐ Favoris
-                    except RuntimeError as erreur:
-                        st.error("Favori non enregistré : " + str(erreur))
+                        favoris = nouveaux_favoris
+                        st.success("✅ Concours enregistré ! Ouvre l'onglet ⭐ Favoris.")
+                    except Exception as erreur:
+                        st.error("Impossible d'enregistrer ce favori : " + str(erreur))
             if connecte and ignores_ok:
                 if concours["url"] in ignores:
                     st.caption("🚫 Tu avais indiqué ne pas être intéressée.")
@@ -773,6 +773,8 @@ with tab1:
 
 with tab6:
     st.subheader("⭐ Mes concours favoris")
+    if st.button("🔄 Actualiser la liste des favoris", key="rafraichir_onglet_favoris"):
+        st.rerun()
     if not st.session_state.get("sb_access_token"):
         st.info("Connecte-toi dans 📒 Participations pour retrouver tes favoris.")
     else:
