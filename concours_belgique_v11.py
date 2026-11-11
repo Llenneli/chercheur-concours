@@ -489,7 +489,8 @@ def sauvegarder_participation(ligne):
     champs = {cle: ligne.get(cle, "") for cle in CHAMPS_CARNET}
     return requete_supabase("/rest/v1/participations", "POST", champs)
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+# L'ordre des variables doit correspondre exactement aux libellés des onglets.
+tab1, tab6, tab2, tab3, tab4, tab5 = st.tabs(
     ["🔎 Recherche", "⭐ Favoris", "🔗 Mes concours", "💡 Réponses", "🎯 Estimation", "📒 Participations"]
 )
 
