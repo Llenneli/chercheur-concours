@@ -248,6 +248,11 @@ def chercher_foudeconcours():
                     continue
                 if not 12 <= len(titre) <= 190 or lien in vus:
                     continue
+                # Ne pas proposer les concours organisés sur les réseaux sociaux.
+                # Vérifier le titre et l'adresse du sujet (y compris son slug).
+                texte_reseau = (titre + " " + chemin_lu).casefold()
+                if re.search(r"facebook|face-book|fb\b|instagram|insta\b", texte_reseau):
+                    continue
                 vus.add(lien)
                 resultats.append({
                     "titre": titre, "url": lien,
