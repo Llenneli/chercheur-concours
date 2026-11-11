@@ -479,6 +479,22 @@ def enregistrer_concours_favoris(favoris):
 
 
 
+def favoris_depuis_serveur():
+    """Synchronise les favoris avec Supabase une fois par exécution complète."""
+    if not st.session_state.get("sb_access_token"):
+        return {}
+    try:
+        liste = lire_concours_favoris()
+        st.session_state.concours_favoris_v11 = liste
+        st.session_state.concours_favoris_erreur = ""
+        return liste
+    except Exception:
+        st.session_state.concours_favoris_erreur = (
+            "Lecture des favoris indisponible. Vérifie la connexion Supabase."
+        )
+        return dict(st.session_state.get("concours_favoris_v11") or {})
+
+
 def charger_participations():
     if not st.session_state.get("sb_access_token"):
         return []
@@ -488,6 +504,9 @@ def charger_participations():
 def sauvegarder_participation(ligne):
     champs = {cle: ligne.get(cle, "") for cle in CHAMPS_CARNET}
     return requete_supabase("/rest/v1/participations", "POST", champs)
+
+# Tous les onglets lisent les mêmes favoris lors d'une exécution complète.
+favoris_communs = favoris_depuis_serveur()
 
 # L'ordre des variables doit correspondre exactement aux libellés des onglets.
 tab1, tab6, tab2, tab3, tab4, tab5 = st.tabs(
@@ -553,13 +572,10 @@ def afficher_liste_concours():
             ignores_ok = True
         except RuntimeError:
             st.caption("Impossible de retrouver pour le moment les concours masqués.")
-        try:
-            favoris_distants = lire_concours_favoris()
-            favoris = favoris_distants
-            st.session_state.concours_favoris_v11 = favoris
-            favoris_ok = True
-        except RuntimeError:
-            st.caption("Impossible de retrouver les favoris pour le moment.")
+        favoris = dict(st.session_state.get("concours_favoris_v11") or {})
+        favoris_ok = not bool(st.session_state.get("concours_favoris_erreur"))
+        if not favoris_ok:
+            st.caption(st.session_state.concours_favoris_erreur)
     else:
         st.info("Pour enregistrer et retrouver les concours déjà joués, connecte-toi d'abord dans l'onglet 📒 Participations.")
     if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
@@ -779,7 +795,9 @@ with tab6:
         st.info("Connecte-toi dans 📒 Participations pour retrouver tes favoris.")
     else:
         try:
-            favoris_carnet = lire_concours_favoris()
+            favoris_carnet = dict(st.session_state.get("concours_favoris_v11") or {})
+            if st.session_state.get("concours_favoris_erreur"):
+                st.warning(st.session_state.concours_favoris_erreur)
             st.write(f"**{len(favoris_carnet)} concours favori(s) enregistré(s)**")
             if not favoris_carnet:
                 st.info("Aucun favori pour l'instant. Ajoute un concours depuis 🔎 Recherche avec ☆ Ajouter aux favoris.")
@@ -799,8 +817,8 @@ with tab6:
                             st.rerun()
                         except RuntimeError as erreur:
                             st.error("Impossible de retirer ce favori : " + str(erreur))
-        except RuntimeError as erreur:
-            st.error("Impossible de charger tes favoris : " + str(erreur))
+        except Exception as erreur:
+            st.error("Impossible d'afficher tes favoris : " + str(erreur))
 
 
 with tab2:
