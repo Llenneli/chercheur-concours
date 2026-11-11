@@ -489,8 +489,8 @@ def sauvegarder_participation(ligne):
     champs = {cle: ligne.get(cle, "") for cle in CHAMPS_CARNET}
     return requete_supabase("/rest/v1/participations", "POST", champs)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["🔎 Recherche", "🔗 Mes concours", "💡 Réponses", "🎯 Estimation", "📒 Participations"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["🔎 Recherche", "⭐ Favoris", "🔗 Mes concours", "💡 Réponses", "🎯 Estimation", "📒 Participations"]
 )
 
 
@@ -771,6 +771,36 @@ def afficher_liste_concours():
 
 with tab1:
     afficher_liste_concours()
+
+with tab6:
+    st.subheader("⭐ Mes concours favoris")
+    if not st.session_state.get("sb_access_token"):
+        st.info("Connecte-toi dans 📒 Participations pour retrouver tes favoris.")
+    else:
+        try:
+            favoris_carnet = lire_concours_favoris()
+            st.write(f"**{len(favoris_carnet)} concours favori(s) enregistré(s)**")
+            if not favoris_carnet:
+                st.info("Aucun favori pour l'instant. Ajoute un concours depuis 🔎 Recherche avec ☆ Ajouter aux favoris.")
+            for indice, (adresse_favori, favori) in enumerate(favoris_carnet.items()):
+                with st.container(border=True):
+                    st.write("**" + favori["titre"] + "**")
+                    if favori["source"]:
+                        st.caption(favori["source"])
+                    st.link_button("🔗 Ouvrir le concours sur Fou de Concours", adresse_favori,
+                                   key=f"favori_lien_{indice}")
+                    if st.button("⭐ Retirer des favoris", key=f"favori_suppr_{indice}"):
+                        try:
+                            restant = dict(favoris_carnet)
+                            restant.pop(adresse_favori, None)
+                            enregistrer_concours_favoris(restant)
+                            st.success("Favori retiré.")
+                            st.rerun()
+                        except RuntimeError as erreur:
+                            st.error("Impossible de retirer ce favori : " + str(erreur))
+        except RuntimeError as erreur:
+            st.error("Impossible de charger tes favoris : " + str(erreur))
+
 
 with tab2:
     st.subheader("Ajouter mes concours")
