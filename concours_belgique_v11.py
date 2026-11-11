@@ -215,7 +215,15 @@ def chercher_foudeconcours():
     vus = set()
     regulieres, erreurs_regulieres = sources_regulieres()
     erreurs.extend(erreurs_regulieres)
-    for source, adresse in FDC_SECTIONS + regulieres:
+    # Explorer également les pages suivantes des deux grandes rubriques.
+    # La page 1 reste prioritaire ; les doublons sont retirés par URL.
+    rubriques = FDC_SECTIONS + regulieres
+    pages_a_lire = []
+    for source, adresse in rubriques:
+        pages_a_lire.append((source, adresse))
+        if source in ("Fou de Concours — Belgique", "Fou de Concours — Étranger pour les Belges"):
+            pages_a_lire.extend((source, adresse.rstrip("/") + "/page" + str(n)) for n in (2, 3))
+    for source, adresse in pages_a_lire:
         try:
             page = lire(adresse)
             for a in page.liens:
@@ -250,8 +258,10 @@ def chercher_foudeconcours():
                     "limite_calculee": date_limite_du_titre(titre),
                 })
         except Exception:
-            erreurs.append(source)
-    return resultats[:60], erreurs
+            # Une page supplémentaire inaccessible ne rend pas la rubrique entière absente.
+            if not re.search(r"/page[23]$", adresse):
+                erreurs.append(source)
+    return resultats[:180], erreurs
 
 def chercher():
     # Fou de Concours uniquement, y compris les concours étrangers ouverts aux Belges.
@@ -402,6 +412,25 @@ def restaurer_connexion_navigateur():
 
 restaurer_connexion_navigateur()
 
+def lire_concours_ignores():
+    """Choix personnels enregistrés dans les métadonnées du compte Supabase."""
+    if not st.session_state.get("sb_access_token"):
+        return set()
+    profil = requete_supabase("/auth/v1/user")
+    metadonnees = (profil or {}).get("user_metadata") or {}
+    liens = metadonnees.get("concours_ignores_v11") or []
+    return set(x for x in liens if isinstance(x, str)) if isinstance(liens, list) else set()
+
+
+def enregistrer_concours_ignores(liens):
+    """N'écrase pas les autres préférences du compte."""
+    if not st.session_state.get("sb_access_token"):
+        raise RuntimeError("Connecte-toi dans 📒 Participations pour enregistrer ce choix.")
+    requete_supabase("/auth/v1/user", "PUT", {
+        "data": {"concours_ignores_v11": sorted(liens)}
+    })
+
+
 def charger_participations():
     if not st.session_state.get("sb_access_token"):
         return []
@@ -454,20 +483,39 @@ def afficher_liste_concours():
     mots = st.text_input("Filtrer par mot-clé", key="filtre_forum")
     masquer = st.checkbox("Masquer les concours terminés", value=True, key="masquer_expires")
     masquer_joues = st.checkbox("Masquer les concours déjà joués", value=False, key="masquer_deja_joues")
+    masquer_ignores = st.checkbox("Masquer les concours sans intérêt", value=True, key="masquer_concours_ignores")
     connecte = bool(st.session_state.get("sb_access_token"))
     historique = []
     historique_ok = False
+    ignores = set(st.session_state.get("concours_ignores_v11") or [])
+    ignores_ok = False
     if connecte:
         try:
             historique = charger_participations()
             historique_ok = True
         except RuntimeError as erreur:
             st.warning("Le suivi des concours joués est indisponible : " + str(erreur))
+        try:
+            ignores = lire_concours_ignores()
+            st.session_state.concours_ignores_v11 = ignores
+            ignores_ok = True
+        except RuntimeError:
+            st.caption("Impossible de retrouver pour le moment les concours masqués.")
     else:
         st.info("Pour enregistrer et retrouver les concours déjà joués, connecte-toi d'abord dans l'onglet 📒 Participations.")
     if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
         chercher_foudeconcours.clear()
     liste, erreurs = chercher()
+    if connecte and ignores_ok and ignores:
+        with st.expander(f"🚫 Concours sans intérêt ({len(ignores)})"):
+            st.caption("Ces choix sont conservés dans ton compte. Tu peux réafficher un concours à tout moment.")
+            if st.button("↩️ Réafficher tous les concours masqués", key="retablir_concours_ignores"):
+                try:
+                    enregistrer_concours_ignores(set())
+                    st.session_state.concours_ignores_v11 = set()
+                    st.rerun(scope="fragment")
+                except RuntimeError as erreur:
+                    st.error(str(erreur))
     if erreurs:
         st.warning("Certaines rubriques n'ont pas pu être lues automatiquement : " + ", ".join(erreurs))
         if "Fou de Concours — Journaliers" in erreurs:
@@ -510,6 +558,8 @@ def afficher_liste_concours():
             continue
         if masquer_joues and historique_ok and statut_deja_joue(concours, historique, aujourdhui):
             continue
+        if masquer_ignores and concours["url"] in ignores:
+            continue
         affichables.append(concours)
     st.write(f"**{len(affichables)} concours affiché(s)**")
     taille_page = 12
@@ -537,6 +587,25 @@ def afficher_liste_concours():
         with st.container(border=True):
             st.write("**" + concours["titre"] + "**")
             st.caption(concours["categorie"] + " — " + concours["source"])
+            if connecte and ignores_ok:
+                if concours["url"] in ignores:
+                    st.caption("🚫 Tu avais indiqué ne pas être intéressée.")
+                    if st.button("↩️ Remettre ce concours", key=f"remettre_ignore_{i}"):
+                        try:
+                            nouveaux = ignores - {concours["url"]}
+                            enregistrer_concours_ignores(nouveaux)
+                            st.session_state.concours_ignores_v11 = nouveaux
+                            st.rerun(scope="fragment")
+                        except RuntimeError as erreur:
+                            st.error(str(erreur))
+                elif st.button("🚫 Pas intéressée", key=f"ignorer_concours_{i}"):
+                    try:
+                        nouveaux = ignores | {concours["url"]}
+                        enregistrer_concours_ignores(nouveaux)
+                        st.session_state.concours_ignores_v11 = nouveaux
+                        st.rerun(scope="fragment")
+                    except RuntimeError as erreur:
+                        st.error(str(erreur))
             if historique_ok:
                 deja_joue = statut_deja_joue(concours, historique, aujourdhui)
                 if deja_joue:
