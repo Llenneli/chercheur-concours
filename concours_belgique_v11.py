@@ -428,12 +428,18 @@ def lire_concours_ignores():
 
 
 def enregistrer_concours_ignores(liens):
-    """N'écrase pas les autres préférences du compte."""
+    """Enregistre les choix dans Supabase et contrôle leur sauvegarde."""
     if not st.session_state.get("sb_access_token"):
         raise RuntimeError("Connecte-toi dans 📒 Participations pour enregistrer ce choix.")
-    requete_supabase("/auth/v1/user", "PUT", {
+    reponse = requete_supabase("/auth/v1/user", "PUT", {
         "data": {"concours_ignores_v11": sorted(liens)}
     })
+    enregistres = ((reponse or {}).get("user_metadata") or {}).get("concours_ignores_v11")
+    if enregistres is None:
+        enregistres = list(lire_concours_ignores())
+    if not isinstance(enregistres, list) or set(enregistres) != set(liens):
+        raise RuntimeError("Supabase n'a pas confirmé l'enregistrement.")
+    st.session_state.concours_ignores_v11 = set(liens)
 
 
 def charger_participations():
@@ -517,8 +523,8 @@ def afficher_liste_concours():
             if st.button("↩️ Réafficher tous les concours masqués", key="retablir_concours_ignores"):
                 try:
                     enregistrer_concours_ignores(set())
-                    st.session_state.concours_ignores_v11 = set()
-                    st.rerun(scope="fragment")
+                    st.success("✅ Tous les concours masqués ont été réaffichés.")
+                    st.caption("Actualise la liste pour voir les changements.")
                 except RuntimeError as erreur:
                     st.error(str(erreur))
     if erreurs:
@@ -598,18 +604,19 @@ def afficher_liste_concours():
                         try:
                             nouveaux = ignores - {concours["url"]}
                             enregistrer_concours_ignores(nouveaux)
-                            st.session_state.concours_ignores_v11 = nouveaux
-                            st.rerun(scope="fragment")
+                            st.success("✅ Concours rétabli et choix enregistré.")
+                            st.caption("Actualise la liste pour voir les changements.")
                         except RuntimeError as erreur:
                             st.error(str(erreur))
                 elif st.button("🚫 Pas intéressée", key=f"ignorer_concours_{i}"):
                     try:
                         nouveaux = ignores | {concours["url"]}
                         enregistrer_concours_ignores(nouveaux)
-                        st.session_state.concours_ignores_v11 = nouveaux
-                        st.rerun(scope="fragment")
-                    except RuntimeError as erreur:
-                        st.error(str(erreur))
+                        ignores = nouveaux
+                        st.success("✅ Concours masqué et choix enregistré !")
+                        st.caption("Il disparaîtra au prochain rafraîchissement.")
+                    except Exception as erreur:
+                        st.error("Impossible de masquer ce concours : " + str(erreur))
             if historique_ok:
                 deja_joue = statut_deja_joue(concours, historique, aujourdhui)
                 if deja_joue:
