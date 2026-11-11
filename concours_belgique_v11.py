@@ -669,9 +669,8 @@ def afficher_liste_concours():
                             nouveaux_favoris = dict(favoris)
                             nouveaux_favoris.pop(url_favori, None)
                             enregistrer_concours_favoris(nouveaux_favoris)
-                            favoris = nouveaux_favoris
-                            st.success("✅ Retiré des favoris !")
-                            st.caption("Le bouton sera mis à jour au prochain affichage.")
+                            st.session_state.concours_favoris_confirmation = "✅ Favori retiré."
+                            st.rerun()  # Recharger aussi l'onglet ⭐ Favoris
                         except RuntimeError as erreur:
                             st.error("Favori non modifié : " + str(erreur))
                 elif st.button("☆ Ajouter aux favoris", key=f"ajouter_favori_{i}"):
@@ -683,9 +682,8 @@ def afficher_liste_concours():
                             "source": concours["source"],
                         }
                         enregistrer_concours_favoris(nouveaux_favoris)
-                        favoris = nouveaux_favoris
-                        st.success("✅ Ajouté aux favoris ! Tu le retrouveras dans ⭐ Mes favoris.")
-                        st.caption("Le bouton sera mis à jour au prochain affichage.")
+                        st.session_state.concours_favoris_confirmation = "✅ Ajouté aux favoris ! Ouvre l'onglet ⭐ Favoris."
+                        st.rerun()  # Recharger aussi l'onglet ⭐ Favoris
                     except RuntimeError as erreur:
                         st.error("Favori non enregistré : " + str(erreur))
             if connecte and ignores_ok:
