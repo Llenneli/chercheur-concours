@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import date
+import time
 from urllib.request import Request, urlopen
 from urllib.parse import urljoin, quote_plus, urlparse
 from html.parser import HTMLParser
@@ -537,7 +538,6 @@ def statut_deja_joue(concours, historique, aujourdhui):
     return False
 
 
-@st.fragment(run_every="30m")
 def afficher_liste_concours():
     st.subheader("🔎 Concours ouverts aux Belges")
     st.caption("Source : Fou de Concours — Belgique, étranger pour les Belges, journaliers et mensuels. Mise à jour toutes les 30 minutes tant que la page est ouverte.")
@@ -687,7 +687,7 @@ def afficher_liste_concours():
                             nouveaux_favoris.pop(url_favori, None)
                             enregistrer_concours_favoris(nouveaux_favoris)
                             st.session_state.concours_favoris_confirmation = "✅ Concours retiré des favoris."
-                            st.rerun(scope="app")  # Rafraîchir également l'onglet Favoris
+                            st.rerun()  # Mettre à jour tous les onglets
                         except Exception as erreur:
                             st.error("Impossible de retirer ce favori : " + str(erreur))
                 elif st.button("☆ Ajouter aux favoris", key=f"ajouter_favori_{i}"):
@@ -700,7 +700,7 @@ def afficher_liste_concours():
                         }
                         enregistrer_concours_favoris(nouveaux_favoris)
                         st.session_state.concours_favoris_confirmation = "✅ Concours enregistré dans ⭐ Favoris."
-                        st.rerun(scope="app")  # Une relance de fragment seule laisse l'autre onglet ancien
+                        st.rerun()  # Mettre à jour tous les onglets
                     except Exception as erreur:
                         st.error("Impossible d'enregistrer ce favori : " + str(erreur))
             if connecte and ignores_ok:
@@ -784,8 +784,23 @@ def afficher_liste_concours():
     st.caption("Le bouton « Marquer comme joué » enregistre la participation sans numéro subsidiaire. Pour conserver le nombre envoyé, utilise plutôt l'onglet 🎯 Estimation. Les concours journaliers redeviennent disponibles le lendemain et les mensuels le mois suivant.")
     st.caption("Les concours sans date lisible restent visibles. Ton historique de participations n'est jamais supprimé par ce filtre.")
 
+@st.fragment(run_every="30m")
+def actualisation_periodique():
+    """Rafraîchit la liste après 30 minutes sans isoler les boutons Favoris."""
+    instant = time.monotonic()
+    dernier = st.session_state.get("derniere_actualisation_automatique_v11")
+    if dernier is None:
+        st.session_state.derniere_actualisation_automatique_v11 = instant
+    elif instant - dernier >= 1800:
+        st.session_state.derniere_actualisation_automatique_v11 = instant
+        chercher_foudeconcours.clear()
+        st.rerun()
+
+
 with tab1:
     afficher_liste_concours()
+
+actualisation_periodique()
 
 with tab6:
     st.subheader("⭐ Mes concours favoris")
