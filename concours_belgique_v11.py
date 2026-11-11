@@ -670,8 +670,8 @@ def afficher_liste_concours():
                             nouveaux_favoris = dict(favoris)
                             nouveaux_favoris.pop(url_favori, None)
                             enregistrer_concours_favoris(nouveaux_favoris)
-                            favoris = nouveaux_favoris
-                            st.success("✅ Ce concours a été retiré des favoris.")
+                            st.session_state.concours_favoris_confirmation = "✅ Concours retiré des favoris."
+                            st.rerun(scope="app")  # Rafraîchir également l'onglet Favoris
                         except Exception as erreur:
                             st.error("Impossible de retirer ce favori : " + str(erreur))
                 elif st.button("☆ Ajouter aux favoris", key=f"ajouter_favori_{i}"):
@@ -683,8 +683,8 @@ def afficher_liste_concours():
                             "source": concours["source"],
                         }
                         enregistrer_concours_favoris(nouveaux_favoris)
-                        favoris = nouveaux_favoris
-                        st.success("✅ Concours enregistré ! Ouvre l'onglet ⭐ Favoris.")
+                        st.session_state.concours_favoris_confirmation = "✅ Concours enregistré dans ⭐ Favoris."
+                        st.rerun(scope="app")  # Une relance de fragment seule laisse l'autre onglet ancien
                     except Exception as erreur:
                         st.error("Impossible d'enregistrer ce favori : " + str(erreur))
             if connecte and ignores_ok:
