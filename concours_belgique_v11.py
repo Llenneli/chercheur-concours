@@ -436,6 +436,37 @@ def enregistrer_concours_ignores(liens):
     })
 
 
+def lire_concours_favoris():
+    """Favoris privés mémorisés dans les métadonnées de l'utilisateur Supabase."""
+    if not st.session_state.get("sb_access_token"):
+        return {}
+    profil = requete_supabase("/auth/v1/user")
+    metadonnees = (profil or {}).get("user_metadata") or {}
+    donnees = metadonnees.get("concours_favoris_v11") or []
+    if not isinstance(donnees, list):
+        return {}
+    return {
+        element["url"]: {
+            "url": element["url"],
+            "titre": str(element.get("titre") or "Concours favori")[:190],
+            "source": str(element.get("source") or "")[:120],
+        }
+        for element in donnees
+        if isinstance(element, dict)
+        and isinstance(element.get("url"), str)
+        and element["url"].startswith("https://")
+    }
+
+
+def enregistrer_concours_favoris(favoris):
+    """Sauvegarder uniquement la préférence favoris, sans modifier le carnet."""
+    if not st.session_state.get("sb_access_token"):
+        raise RuntimeError("Connecte-toi dans 📒 Participations pour gérer tes favoris.")
+    requete_supabase("/auth/v1/user", "PUT", {
+        "data": {"concours_favoris_v11": list(favoris.values())}
+    })
+
+
 def charger_participations():
     if not st.session_state.get("sb_access_token"):
         return []
@@ -489,11 +520,14 @@ def afficher_liste_concours():
     masquer = st.checkbox("Masquer les concours terminés", value=True, key="masquer_expires")
     masquer_joues = st.checkbox("Masquer les concours déjà joués", value=False, key="masquer_deja_joues")
     masquer_ignores = st.checkbox("Masquer les concours sans intérêt", value=True, key="masquer_concours_ignores")
+    favoris_uniquement = st.checkbox("⭐ Afficher seulement mes favoris", value=False, key="filtre_favoris")
     connecte = bool(st.session_state.get("sb_access_token"))
     historique = []
     historique_ok = False
     ignores = set(st.session_state.get("concours_ignores_v11") or [])
     ignores_ok = False
+    favoris = dict(st.session_state.get("concours_favoris_v11") or {})
+    favoris_ok = False
     if connecte:
         try:
             historique = charger_participations()
@@ -506,11 +540,27 @@ def afficher_liste_concours():
             ignores_ok = True
         except RuntimeError:
             st.caption("Impossible de retrouver pour le moment les concours masqués.")
+        try:
+            favoris = lire_concours_favoris()
+            st.session_state.concours_favoris_v11 = favoris
+            favoris_ok = True
+        except RuntimeError:
+            st.caption("Impossible de retrouver les favoris pour le moment.")
     else:
         st.info("Pour enregistrer et retrouver les concours déjà joués, connecte-toi d'abord dans l'onglet 📒 Participations.")
     if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
         chercher_foudeconcours.clear()
     liste, erreurs = chercher()
+    if connecte and favoris_ok:
+        with st.expander(f"⭐ Mes favoris ({len(favoris)})"):
+            if favoris:
+                st.caption("Tes favoris restent enregistrés même si un concours disparaît de la recherche.")
+                for favori in favoris.values():
+                    st.link_button("🌐 " + favori["titre"], favori["url"])
+            else:
+                st.caption("Appuie sur « ⭐ Ajouter aux favoris » sous un concours pour le retrouver ici.")
+    elif favoris_uniquement:
+        st.info("Connecte-toi dans 📒 Participations pour retrouver tes favoris.")
     if connecte and ignores_ok and ignores:
         with st.expander(f"🚫 Concours sans intérêt ({len(ignores)})"):
             st.caption("Ces choix sont conservés dans ton compte. Tu peux réafficher un concours à tout moment.")
@@ -565,6 +615,8 @@ def afficher_liste_concours():
             continue
         if masquer_ignores and concours["url"] in ignores:
             continue
+        if favoris_uniquement and concours["url"] not in favoris:
+            continue
         affichables.append(concours)
     st.write(f"**{len(affichables)} concours affiché(s)**")
     taille_page = 12
@@ -591,6 +643,31 @@ def afficher_liste_concours():
         with st.container(border=True):
             st.write("**" + concours["titre"] + "**")
             st.caption(concours["categorie"] + " — " + concours["source"])
+            if connecte and favoris_ok:
+                url_favori = concours["url"]
+                if url_favori in favoris:
+                    if st.button("⭐ Retirer des favoris", key=f"retirer_favori_{i}"):
+                        try:
+                            nouveaux_favoris = dict(favoris)
+                            nouveaux_favoris.pop(url_favori, None)
+                            enregistrer_concours_favoris(nouveaux_favoris)
+                            st.session_state.concours_favoris_v11 = nouveaux_favoris
+                            st.rerun(scope="fragment")
+                        except RuntimeError as erreur:
+                            st.error("Favori non modifié : " + str(erreur))
+                elif st.button("☆ Ajouter aux favoris", key=f"ajouter_favori_{i}"):
+                    try:
+                        nouveaux_favoris = dict(favoris)
+                        nouveaux_favoris[url_favori] = {
+                            "url": url_favori,
+                            "titre": concours["titre"],
+                            "source": concours["source"],
+                        }
+                        enregistrer_concours_favoris(nouveaux_favoris)
+                        st.session_state.concours_favoris_v11 = nouveaux_favoris
+                        st.rerun(scope="fragment")
+                    except RuntimeError as erreur:
+                        st.error("Favori non enregistré : " + str(erreur))
             if connecte and ignores_ok:
                 if concours["url"] in ignores:
                     st.caption("🚫 Tu avais indiqué ne pas être intéressée.")
