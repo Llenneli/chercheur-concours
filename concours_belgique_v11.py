@@ -328,106 +328,9 @@ def chercher_sources_belges():
     return trouves[:20], erreurs
 
 
-
-# Qu4tre affiche ses concours sur la page d'accueil et dans /concours.
-# En cas d'indisponibilité, les autres sources restent intactes.
-QU4TRE_PAGES = (
-    "https://www.qu4tre.be/",
-    "https://www.qu4tre.be/concours",
-    "https://www.qu4tre.be/infos",
-)
-QU4TRE_LIENS_VERIFIES = (
-    (
-        "🎬 Concours CUT x Les Grignoux",
-        "https://www.qu4tre.be/concours/concours-cut-x-les-grignoux",
-    ),
-    (
-        "🧖 Tentez de remporter une cabine infrarouge",
-        "https://www.qu4tre.be/concours/tentez-de-remporter-une-cabine-infrarouge-dune-valeur-de-3-250",
-    ),
-)
-
-
-def details_concours_qu4tre(url):
-    """Vérifie les conditions sur la page du concours ; ne devine jamais l'année passée."""
-    page = lire(url)
-    texte = " ".join(" ".join(page.texte).split())
-    if re.search(r"(?:pour participer|afin de participer|participation via).{0,100}(?:facebook|instagram)", texte, re.I):
-        return None
-    if "concours permanent" in texte.casefold() or "concours hebdomadaire récurrent" in texte.casefold():
-        return {"limite_calculee": None, "date_non_confirmee": False}
-    motif = (
-        r"(?:concours valable jusqu.au|jusqu.au|fin du concours)"
-        r"\s*:?\s*(?:le\s*)?(\d{1,2})\s+([a-zéûôè]+)"
-        r"(?:\s+(20\d{2}))?"
-    )
-    for m in re.finditer(motif, texte, re.I):
-        mois = MOIS.get(m.group(2).casefold())
-        if not mois:
-            continue
-        annee = int(m.group(3)) if m.group(3) else date.today().year
-        try:
-            fin = date(annee, mois, int(m.group(1)))
-        except ValueError:
-            continue
-        if fin >= date.today():
-            return {"limite_calculee": fin, "date_non_confirmee": False}
-        return None
-    # Ne pas afficher une ancienne page sans date de fin vérifiable.
-    return None
-
-
-@st.cache_data(ttl=1800)
-def chercher_qu4tre():
-    candidats = {}
-    pages_lues = 0
-    for adresse in QU4TRE_PAGES:
-        try:
-            page = lire(adresse)
-            pages_lues += 1
-        except Exception:
-            continue
-        for lien_info in page.liens:
-            destination = urljoin(adresse, lien_info["url"])
-            analyse = urlparse(destination)
-            if analyse.hostname not in ("qu4tre.be", "www.qu4tre.be"):
-                continue
-            if not analyse.path.startswith("/concours/"):
-                continue
-            if analyse.path.rstrip("/") in ("/concours/reglement", "/concours/reglement-concours"):
-                continue
-            titre = " ".join(lien_info["titre"].split())
-            if len(titre) < 12:
-                titre = analyse.path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ").capitalize()
-            if concours_sur_reseau_social(titre, destination):
-                continue
-            candidats[destination] = titre[:190]
-
-    # Ces deux adresses de concours officiels ont été vérifiées le 12/11/2026.
-    # Les pages elles-mêmes restent vérifiées avant d'être affichées.
-    for titre, url in QU4TRE_LIENS_VERIFIES:
-        candidats.setdefault(url, titre)
-
-    trouves = []
-    for destination, titre in list(candidats.items())[:12]:
-        try:
-            details = details_concours_qu4tre(destination)
-        except Exception:
-            continue
-        if details is None:
-            continue
-        concours = nouveau_concours_direct(titre, destination, "Qu4tre")
-        concours.update(details)
-        trouves.append(concours)
-    return trouves, (["Qu4tre"] if not pages_lues and not trouves else [])
-
-
 def chercher():
     resultats_forum, erreurs_forum = chercher_foudeconcours()
     resultats_directs, erreurs_directs = chercher_sources_belges()
-    resultats_qu4tre, erreurs_qu4tre = chercher_qu4tre()
-    resultats_directs.extend(resultats_qu4tre)
-    erreurs_directs.extend(erreurs_qu4tre)
     # On garde toujours les concours du forum et on évite les doublons exacts.
     liens_vus = {x["url"].rstrip("/") for x in resultats_forum}
     for concours in resultats_directs:
@@ -647,11 +550,11 @@ def statut_deja_joue(concours, historique, aujourdhui):
 @st.fragment(run_every="30m")
 def afficher_liste_concours():
     st.subheader("🔎 Concours ouverts aux Belges")
-    st.caption("Sources : Fou de Concours, Radio Contact et Qu4tre. Mise à jour toutes les 30 minutes tant que la page est ouverte.")
+    st.caption("Sources : Fou de Concours et Radio Contact. Mise à jour toutes les 30 minutes tant que la page est ouverte.")
     origine = st.selectbox(
         "Origine des concours",
         ["Tous les concours pour les Belges", "Organisés en Belgique", "Organisés à l'étranger",
-         "Journaliers", "Mensuels", "Radio Contact", "Qu4tre"],
+         "Journaliers", "Mensuels", "Radio Contact"],
         key="origine_forum"
     )
     cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
@@ -682,7 +585,6 @@ def afficher_liste_concours():
     if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
         chercher_foudeconcours.clear()
         chercher_sources_belges.clear()
-        chercher_qu4tre.clear()
     liste, erreurs = chercher()
     if connecte and ignores_ok and ignores:
         with st.expander(f"🚫 Concours sans intérêt ({len(ignores)})"):
@@ -706,11 +608,10 @@ def afficher_liste_concours():
     nb_journaliers = sum(1 for x in liste if x["source"] == "Fou de Concours — Journaliers")
     nb_mensuels = sum(1 for x in liste if x["source"] == "Fou de Concours — Mensuels")
     nb_radio = sum(1 for x in liste if x["source"] == "Radio Contact")
-    nb_qu4tre = sum(1 for x in liste if x["source"] == "Qu4tre")
     st.caption(
         f"Trouvés : {nb_belges} belges, {nb_etrangers} étrangers pour les Belges, "
         f"{nb_journaliers} journaliers, {nb_mensuels} mensuels et "
-        f"{nb_radio} Radio Contact et {nb_qu4tre} Qu4tre (avant filtrage)."
+        f"{nb_radio} Radio Contact (avant filtrage)."
     )
     if nb_etrangers == 0:
         st.warning("Aucun concours étranger récupéré pour le moment. La rubrique peut être indisponible.")
@@ -720,7 +621,7 @@ def afficher_liste_concours():
     affichables = []
     for concours in liste:
         if origine == "Organisés en Belgique" and concours["source"] not in (
-            "Fou de Concours — Belgique", "Radio Contact", "Qu4tre"
+            "Fou de Concours — Belgique", "Radio Contact"
         ):
             continue
         if origine == "Organisés à l'étranger" and concours["source"] != "Fou de Concours — Étranger pour les Belges":
@@ -729,7 +630,7 @@ def afficher_liste_concours():
             continue
         if origine == "Mensuels" and concours["source"] != "Fou de Concours — Mensuels":
             continue
-        if origine in ("Radio Contact", "Qu4tre") and concours["source"] != origine:
+        if origine == "Radio Contact" and concours["source"] != "Radio Contact":
             continue
         limite = concours.get("limite_calculee")
         if masquer and limite and limite < aujourdhui and concours["source"] not in (
@@ -825,7 +726,7 @@ def afficher_liste_concours():
                 st.caption("Concours récurrent : la date du titre peut concerner une édition passée.")
             lien_confirme = lien_direct_confirme(concours)
             if concours.get("lien_direct_officiel"):
-                st.link_button("🌐 Voir le concours sur le site officiel",
+                st.link_button("🌐 Voir le concours sur Radio Contact",
                                concours["url"], key=f"radio_{i}")
                 st.caption("Vérifie que ce concours est encore ouvert et accessible sans réseaux sociaux.")
             elif lien_confirme:
