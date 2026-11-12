@@ -509,6 +509,56 @@ def enregistrer_concours_ignores(liens):
     st.session_state.concours_ignores_v11 = set(liens)
 
 
+def reperer_nouveaux_concours(liste):
+    """Comparer les liens aux visites précédentes, sans toucher aux participations.
+
+    La première utilisation initialise le repère : les concours déjà présents
+    ne sont pas présentés à tort comme de nouvelles publications.
+    Les nouveautés restent visibles pendant toute la session en cours.
+    """
+    nouveautes = set(st.session_state.get("nouveaux_concours_v11") or [])
+    if not st.session_state.get("sb_access_token"):
+        return nouveautes, False
+
+    liens_actuels = {
+        x["url"].rstrip("/") for x in liste if x.get("url", "").startswith("https://")
+    }
+    try:
+        if "concours_deja_vus_v11" not in st.session_state:
+            profil = requete_supabase("/auth/v1/user")
+            donnees = ((profil or {}).get("user_metadata") or {}).get("concours_vus_v11")
+            if isinstance(donnees, list):
+                anciens = {url for url in donnees if isinstance(url, str)}
+                st.session_state["nouveaux_concours_v11"] = liens_actuels - anciens
+            else:
+                # Première visite avec cette fonction : on crée le point de départ.
+                anciens = set()
+                st.session_state["nouveaux_concours_v11"] = set()
+                st.session_state["nouveaux_initialises_v11"] = True
+            st.session_state.concours_deja_vus_v11 = anciens
+
+        anciens = st.session_state.concours_deja_vus_v11
+        if liens_actuels - anciens:
+            if not st.session_state.get("nouveaux_initialises_v11"):
+                st.session_state.nouveaux_concours_v11 = (
+                    set(st.session_state.nouveaux_concours_v11) | (liens_actuels - anciens)
+                )
+            tous_vus = anciens | liens_actuels
+            # Vérification du résultat avant de considérer l'enregistrement comme fait.
+            reponse = requete_supabase("/auth/v1/user", "PUT", {
+                "data": {"concours_vus_v11": sorted(tous_vus)[-1000:]}
+            })
+            vus_confirms = ((reponse or {}).get("user_metadata") or {}).get("concours_vus_v11")
+            if not isinstance(vus_confirms, list):
+                raise RuntimeError("Enregistrement des nouveautés non confirmé.")
+            st.session_state.concours_deja_vus_v11 = tous_vus
+
+        return set(st.session_state.nouveaux_concours_v11), True
+    except Exception:
+        st.caption("Le repérage des nouveaux concours est momentanément indisponible.")
+        return set(st.session_state.get("nouveaux_concours_v11") or []), False
+
+
 def charger_participations():
     if not st.session_state.get("sb_access_token"):
         return []
@@ -563,6 +613,7 @@ def afficher_liste_concours():
     # Nouveaux identifiants : ne pas hériter d'une ancienne case désactivée.
     masquer_joues = st.checkbox("Masquer les concours déjà joués", value=True, key="masquer_deja_joues_auto_v11")
     masquer_ignores = st.checkbox("Masquer les concours sans intérêt", value=True, key="masquer_concours_ignores_auto_v11")
+    nouveaux_seulement = st.checkbox("🆕 Afficher seulement les nouveaux concours", value=False, key="filtrer_nouveaux_v11")
     connecte = bool(st.session_state.get("sb_access_token"))
     historique = []
     historique_ok = False
@@ -586,6 +637,11 @@ def afficher_liste_concours():
         chercher_foudeconcours.clear()
         chercher_sources_belges.clear()
     liste, erreurs = chercher()
+    nouveaux_concours, nouveautes_disponibles = reperer_nouveaux_concours(liste)
+    if nouveautes_disponibles:
+        st.caption(f"🆕 {len(nouveaux_concours)} nouveau(x) concours depuis ta précédente visite.")
+        if st.session_state.get("nouveaux_initialises_v11"):
+            st.caption("Repère initial créé aujourd'hui : les prochains concours ajoutés seront signalés.")
     if connecte and ignores_ok and ignores:
         with st.expander(f"🚫 Concours sans intérêt ({len(ignores)})"):
             st.caption("Ces choix sont conservés dans ton compte. Tu peux réafficher un concours à tout moment.")
@@ -645,6 +701,8 @@ def afficher_liste_concours():
             continue
         if masquer_ignores and concours["url"] in ignores:
             continue
+        if nouveaux_seulement and concours["url"].rstrip("/") not in nouveaux_concours:
+            continue
         affichables.append(concours)
     st.write(f"**{len(affichables)} concours affiché(s)**")
     taille_page = 12
@@ -670,6 +728,8 @@ def afficher_liste_concours():
     for i, concours in enumerate(a_afficher, start=debut_page):
         with st.container(border=True):
             st.write("**" + concours["titre"] + "**")
+            if concours["url"].rstrip("/") in nouveaux_concours:
+                st.caption("🆕 Nouveau depuis ta dernière visite")
             st.caption(concours["categorie"] + " — " + concours["source"])
             if connecte and ignores_ok:
                 if concours["url"] in ignores:
