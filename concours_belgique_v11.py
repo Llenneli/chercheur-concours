@@ -552,6 +552,8 @@ def reperer_nouveaux_concours(liste):
             if not isinstance(vus_confirms, list):
                 raise RuntimeError("Enregistrement des nouveautés non confirmé.")
             st.session_state.concours_deja_vus_v11 = tous_vus
+            # L'initialisation est terminée ; les publications suivantes sont nouvelles.
+            st.session_state.nouveaux_initialises_v11 = False
 
         return set(st.session_state.nouveaux_concours_v11), True
     except Exception:
