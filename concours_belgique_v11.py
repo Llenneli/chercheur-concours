@@ -268,9 +268,76 @@ def chercher_foudeconcours():
                 erreurs.append(source)
     return resultats[:180], erreurs
 
+# Sources supplémentaires : pages officielles avec des formulaires sur leur site.
+# Ne jamais deviner une adresse de concours ni importer des liens sociaux.
+SOURCES_BELGES_DIRECTES = [
+    ("Radio Contact", "https://www.radiocontact.be/concours/"),
+]
+
+
+def concours_sur_reseau_social(titre, adresse):
+    texte = (titre + " " + adresse).casefold()
+    return bool(re.search(r"facebook|face-book|instagram|insta\b|tiktok", texte))
+
+
+def nouveau_concours_direct(titre, lien, source):
+    return {
+        "titre": titre,
+        "url": lien,
+        "categorie": categorie(titre, ""),
+        "source": source,
+        "date_non_confirmee": True,
+        "date_titre": None,
+        "limite_calculee": None,
+        "lien_direct_officiel": True,
+    }
+
+
+@st.cache_data(ttl=1800)
+def chercher_sources_belges():
+    """Lire les listes de concours des organisateurs sans scraper les réseaux sociaux."""
+    trouves, erreurs = [], []
+    vus = set()
+    for source, adresse in SOURCES_BELGES_DIRECTES:
+        try:
+            page = lire(adresse)
+            for element in page.liens:
+                lien = urljoin(adresse, element["url"])
+                analyse = urlparse(lien)
+                domaine = (analyse.hostname or "").lower()
+                chemin = analyse.path.rstrip("/")
+                valide = (
+                    domaine in ("radiocontact.be", "www.radiocontact.be")
+                    and chemin.startswith("/concours/")
+                    and chemin not in ("/concours/past", "/concours/actifs")
+                )
+                if not valide or lien in vus:
+                    continue
+                titre = " ".join(element["titre"].split())
+                if len(titre) < 12:
+                    # Le lien de l'image peut ne contenir aucun texte.
+                    titre = chemin.rsplit("/", 1)[-1].replace("-", " ").capitalize()
+                if not 12 <= len(titre) <= 190:
+                    continue
+                if concours_sur_reseau_social(titre, lien):
+                    continue
+                vus.add(lien)
+                trouves.append(nouveau_concours_direct(titre, lien, source))
+        except Exception:
+            erreurs.append(source)
+    return trouves[:20], erreurs
+
+
 def chercher():
-    # Fou de Concours uniquement, y compris les concours étrangers ouverts aux Belges.
-    return chercher_foudeconcours()
+    resultats_forum, erreurs_forum = chercher_foudeconcours()
+    resultats_directs, erreurs_directs = chercher_sources_belges()
+    # On garde toujours les concours du forum et on évite les doublons exacts.
+    liens_vus = {x["url"].rstrip("/") for x in resultats_forum}
+    for concours in resultats_directs:
+        if concours["url"].rstrip("/") not in liens_vus:
+            resultats_forum.append(concours)
+            liens_vus.add(concours["url"].rstrip("/"))
+    return resultats_forum, erreurs_forum + erreurs_directs
 
 @st.cache_data(ttl=3600)
 def date_concours(url):
@@ -483,11 +550,11 @@ def statut_deja_joue(concours, historique, aujourdhui):
 @st.fragment(run_every="30m")
 def afficher_liste_concours():
     st.subheader("🔎 Concours ouverts aux Belges")
-    st.caption("Source : Fou de Concours — Belgique, étranger pour les Belges, journaliers et mensuels. Mise à jour toutes les 30 minutes tant que la page est ouverte.")
+    st.caption("Sources : Fou de Concours et Radio Contact. Mise à jour toutes les 30 minutes tant que la page est ouverte.")
     origine = st.selectbox(
         "Origine des concours",
         ["Tous les concours pour les Belges", "Organisés en Belgique", "Organisés à l'étranger",
-         "Journaliers", "Mensuels"],
+         "Journaliers", "Mensuels", "Radio Contact"],
         key="origine_forum"
     )
     cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
@@ -517,6 +584,7 @@ def afficher_liste_concours():
         st.info("Pour enregistrer et retrouver les concours déjà joués, connecte-toi d'abord dans l'onglet 📒 Participations.")
     if st.button("🔄 Actualiser maintenant", key="rafraichir_forum"):
         chercher_foudeconcours.clear()
+        chercher_sources_belges.clear()
     liste, erreurs = chercher()
     if connecte and ignores_ok and ignores:
         with st.expander(f"🚫 Concours sans intérêt ({len(ignores)})"):
@@ -539,9 +607,11 @@ def afficher_liste_concours():
     nb_etrangers = sum(1 for x in liste if x["source"] == "Fou de Concours — Étranger pour les Belges")
     nb_journaliers = sum(1 for x in liste if x["source"] == "Fou de Concours — Journaliers")
     nb_mensuels = sum(1 for x in liste if x["source"] == "Fou de Concours — Mensuels")
+    nb_radio = sum(1 for x in liste if x["source"] == "Radio Contact")
     st.caption(
-        f"Trouvés sur le forum : {nb_belges} belges, {nb_etrangers} étrangers pour les Belges, "
-        f"{nb_journaliers} journaliers et {nb_mensuels} mensuels (avant filtrage des dates)."
+        f"Trouvés : {nb_belges} belges, {nb_etrangers} étrangers pour les Belges, "
+        f"{nb_journaliers} journaliers, {nb_mensuels} mensuels et "
+        f"{nb_radio} Radio Contact (avant filtrage)."
     )
     if nb_etrangers == 0:
         st.warning("Aucun concours étranger récupéré pour le moment. La rubrique peut être indisponible.")
@@ -550,13 +620,17 @@ def afficher_liste_concours():
     aujourdhui = date.today()
     affichables = []
     for concours in liste:
-        if origine == "Organisés en Belgique" and concours["source"] != "Fou de Concours — Belgique":
+        if origine == "Organisés en Belgique" and concours["source"] not in (
+            "Fou de Concours — Belgique", "Radio Contact"
+        ):
             continue
         if origine == "Organisés à l'étranger" and concours["source"] != "Fou de Concours — Étranger pour les Belges":
             continue
         if origine == "Journaliers" and concours["source"] != "Fou de Concours — Journaliers":
             continue
         if origine == "Mensuels" and concours["source"] != "Fou de Concours — Mensuels":
+            continue
+        if origine == "Radio Contact" and concours["source"] != "Radio Contact":
             continue
         limite = concours.get("limite_calculee")
         if masquer and limite and limite < aujourdhui and concours["source"] not in (
@@ -586,7 +660,7 @@ def afficher_liste_concours():
     # Le cache évite de relire chaque discussion à chaque interaction.
     urls_a_verifier = [
         concours["url"] for concours in a_afficher
-        if not lien_direct_confirme(concours)
+        if not lien_direct_confirme(concours) and not concours.get("lien_direct_officiel")
     ]
     liens_automatiques = {}
     if urls_a_verifier:
@@ -651,7 +725,11 @@ def afficher_liste_concours():
             if concours["source"] in ("Fou de Concours — Journaliers", "Fou de Concours — Mensuels"):
                 st.caption("Concours récurrent : la date du titre peut concerner une édition passée.")
             lien_confirme = lien_direct_confirme(concours)
-            if lien_confirme:
+            if concours.get("lien_direct_officiel"):
+                st.link_button("🌐 Voir le concours sur Radio Contact",
+                               concours["url"], key=f"radio_{i}")
+                st.caption("Vérifie que ce concours est encore ouvert et accessible sans réseaux sociaux.")
+            elif lien_confirme:
                 if lien_confirme["fin"] >= aujourdhui:
                     st.link_button("🌐 Participer directement sur Moustique",
                                    lien_confirme["lien"], key=f"direct_valide_{i}")
@@ -672,7 +750,8 @@ def afficher_liste_concours():
                 else:
                     st.caption("🔎 Aucun lien direct accessible automatiquement pour ce concours.")
                 st.caption("Vérifie la page du concours et ses conditions avant de participer.")
-            st.link_button("Voir la discussion sur Fou de Concours", concours["url"], key=f"fdc_{i}")
+            if not concours.get("lien_direct_officiel"):
+                st.link_button("Voir la discussion sur Fou de Concours", concours["url"], key=f"fdc_{i}")
     st.caption("Le bouton « Marquer comme joué » enregistre la participation sans numéro subsidiaire. Pour conserver le nombre envoyé, utilise plutôt l'onglet 🎯 Estimation. Les concours journaliers redeviennent disponibles le lendemain et les mensuels le mois suivant.")
     st.caption("Les concours sans date lisible restent visibles. Ton historique de participations n'est jamais supprimé par ce filtre.")
 
