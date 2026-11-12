@@ -602,12 +602,13 @@ def statut_deja_joue(concours, historique, aujourdhui):
 @st.fragment(run_every="30m")
 def afficher_liste_concours():
     st.subheader("🔎 Concours ouverts aux Belges")
+    st.caption("✅ V11 — Radio Contact + Nouveaux concours 🆕 (sans Qu4tre)")
     st.caption("Sources : Fou de Concours et Radio Contact. Mise à jour toutes les 30 minutes tant que la page est ouverte.")
     origine = st.selectbox(
         "Origine des concours",
         ["Tous les concours pour les Belges", "Organisés en Belgique", "Organisés à l'étranger",
          "Journaliers", "Mensuels", "Radio Contact"],
-        key="origine_forum"
+        key="origine_forum_sans_qu4tre_v11"
     )
     cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
     mots = st.text_input("Filtrer par mot-clé", key="filtre_forum")
