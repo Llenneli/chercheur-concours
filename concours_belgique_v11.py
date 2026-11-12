@@ -281,7 +281,7 @@ SOURCES_BELGES_DIRECTES = [
 
 def concours_sur_reseau_social(titre, adresse):
     texte = (titre + " " + adresse).casefold()
-    return bool(re.search(r"facebook|face-book|instagram|insta\\b|tiktok", texte))
+    return bool(re.search(r"facebook|face-book|instagram|insta\b|tiktok", texte))
 
 
 def nouveau_concours_direct(titre, lien, source):
@@ -298,6 +298,40 @@ def nouveau_concours_direct(titre, lien, source):
 
 
 @st.cache_data(ttl=1800)
+def informations_concours_direct(lien):
+    """Lire la date de fin sur la page officielle, sans inventer une date."""
+    page = lire(lien)
+    texte = " ".join(" ".join(page.texte).split())
+    # Les deux sites publient typiquement 'Fin du concours : 13 novembre 2026'
+    # ou 'Concours valable jusqu'au 22 novembre à 23h59'.
+    motif = (
+        r"(?:fin du concours|concours valable jusqu.au|jusqu.au)"
+        r"\\s*:?\\s*(?:le\\s*)?(\\d{1,2})\\s+([a-zéûôè]+)"
+        r"(?:\\s+(20\\d{2}))?"
+    )
+    fin = None
+    for m in re.finditer(motif, texte, flags=re.I):
+        mois = MOIS.get(m.group(2).casefold())
+        if not mois:
+            continue
+        annee = int(m.group(3)) if m.group(3) else date.today().year
+        try:
+            fin = date(annee, mois, int(m.group(1)))
+            break
+        except ValueError:
+            pass
+    permanent = bool(re.search(r"concours permanent|concours hebdomadaire récurrent", texte, re.I))
+    # Exclure les concours nécessitant clairement un commentaire/partage social.
+    limite = re.search(
+        r"(?:pour participer|afin de participer|participez via|participation sur)"
+        r".{0,110}(?:facebook|instagram)", texte, re.I
+    )
+    # Exclure les concours payants par SMS lorsqu'ils sont explicitement annoncés.
+    sms_payant = bool(re.search(r"(?:sms|message).{0,45}\\d+[,.]\\d+\\s*€", texte, re.I))
+    return fin, permanent, bool(limite or sms_payant)
+
+
+@st.cache_data(ttl=1800)
 def chercher_sources_belges():
     """Lire les listes de concours des organisateurs sans scraper les réseaux sociaux."""
     trouves, erreurs = [], []
@@ -305,6 +339,7 @@ def chercher_sources_belges():
     for source, adresse in SOURCES_BELGES_DIRECTES:
         try:
             page = lire(adresse)
+            nb_verifications = 0
             for element in page.liens:
                 lien = urljoin(adresse, element["url"])
                 analyse = urlparse(lien)
@@ -320,6 +355,9 @@ def chercher_sources_belges():
                               and chemin != "/concours/reglement")
                 if not valide or lien in vus:
                     continue
+                if nb_verifications >= 12:
+                    break
+                nb_verifications += 1
                 titre = " ".join(element["titre"].split())
                 if len(titre) < 12:
                     # Le lien de l'image peut ne contenir aucun texte.
@@ -328,11 +366,25 @@ def chercher_sources_belges():
                     continue
                 if concours_sur_reseau_social(titre, lien):
                     continue
+                try:
+                    fin, permanent, interdit = informations_concours_direct(lien)
+                except Exception:
+                    # Ne pas ajouter un concours dont on ne peut pas lire les conditions.
+                    continue
+                if interdit or (fin and fin < date.today()):
+                    continue
+                # Éviter les anciennes pages sans date, sauf concours récurrent confirmé.
+                if fin is None and not permanent:
+                    continue
+                concours = nouveau_concours_direct(titre, lien, source)
+                concours["limite_calculee"] = fin
+                concours["date_non_confirmee"] = fin is None
+                concours["periodique_hebdo"] = permanent
                 vus.add(lien)
-                trouves.append(nouveau_concours_direct(titre, lien, source))
+                trouves.append(concours)
         except Exception:
             erreurs.append(source)
-    return trouves[:35], erreurs
+    return trouves[:24], erreurs
 
 
 def chercher():
