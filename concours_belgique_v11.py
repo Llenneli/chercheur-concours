@@ -306,8 +306,8 @@ def informations_concours_direct(lien):
     # ou 'Concours valable jusqu'au 22 novembre à 23h59'.
     motif = (
         r"(?:fin du concours|concours valable jusqu.au|jusqu.au)"
-        r"\\s*:?\\s*(?:le\\s*)?(\\d{1,2})\\s+([a-zéûôè]+)"
-        r"(?:\\s+(20\\d{2}))?"
+        r"\s*:?\s*(?:le\s*)?(\d{1,2})\s+([a-zéûôè]+)"
+        r"(?:\s+(20\d{2}))?"
     )
     fin = None
     for m in re.finditer(motif, texte, flags=re.I):
@@ -327,7 +327,7 @@ def informations_concours_direct(lien):
         r".{0,110}(?:facebook|instagram)", texte, re.I
     )
     # Exclure les concours payants par SMS lorsqu'ils sont explicitement annoncés.
-    sms_payant = bool(re.search(r"(?:sms|message).{0,45}\\d+[,.]\\d+\\s*€", texte, re.I))
+    sms_payant = bool(re.search(r"(?:sms|message).{0,45}\d+[,.]\d+\s*€", texte, re.I))
     return fin, permanent, bool(limite or sms_payant)
 
 
