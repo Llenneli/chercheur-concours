@@ -493,8 +493,9 @@ def afficher_liste_concours():
     cat = st.selectbox("Catégorie", CATEGORIES, key="cat_forum")
     mots = st.text_input("Filtrer par mot-clé", key="filtre_forum")
     masquer = st.checkbox("Masquer les concours terminés", value=True, key="masquer_expires")
-    masquer_joues = st.checkbox("Masquer les concours déjà joués", value=False, key="masquer_deja_joues")
-    masquer_ignores = st.checkbox("Masquer les concours sans intérêt", value=True, key="masquer_concours_ignores")
+    # Nouveaux identifiants : ne pas hériter d'une ancienne case désactivée.
+    masquer_joues = st.checkbox("Masquer les concours déjà joués", value=True, key="masquer_deja_joues_auto_v11")
+    masquer_ignores = st.checkbox("Masquer les concours sans intérêt", value=True, key="masquer_concours_ignores_auto_v11")
     connecte = bool(st.session_state.get("sb_access_token"))
     historique = []
     historique_ok = False
@@ -523,8 +524,7 @@ def afficher_liste_concours():
             if st.button("↩️ Réafficher tous les concours masqués", key="retablir_concours_ignores"):
                 try:
                     enregistrer_concours_ignores(set())
-                    st.success("✅ Tous les concours masqués ont été réaffichés.")
-                    st.caption("Actualise la liste pour voir les changements.")
+                    st.rerun(scope="fragment")
                 except RuntimeError as erreur:
                     st.error(str(erreur))
     if erreurs:
@@ -604,17 +604,14 @@ def afficher_liste_concours():
                         try:
                             nouveaux = ignores - {concours["url"]}
                             enregistrer_concours_ignores(nouveaux)
-                            st.success("✅ Concours rétabli et choix enregistré.")
-                            st.caption("Actualise la liste pour voir les changements.")
+                            st.rerun(scope="fragment")
                         except RuntimeError as erreur:
                             st.error(str(erreur))
                 elif st.button("🚫 Pas intéressée", key=f"ignorer_concours_{i}"):
                     try:
                         nouveaux = ignores | {concours["url"]}
                         enregistrer_concours_ignores(nouveaux)
-                        ignores = nouveaux
-                        st.success("✅ Concours masqué et choix enregistré !")
-                        st.caption("Il disparaîtra au prochain rafraîchissement.")
+                        st.rerun(scope="fragment")
                     except Exception as erreur:
                         st.error("Impossible de masquer ce concours : " + str(erreur))
             if historique_ok:
