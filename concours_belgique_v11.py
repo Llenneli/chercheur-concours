@@ -510,55 +510,60 @@ def enregistrer_concours_ignores(liens):
 
 
 def reperer_nouveaux_concours(liste):
-    """Comparer les liens aux visites précédentes, sans toucher aux participations.
+    """Conserver les nouveautés dans le compte jusqu'à confirmation de lecture.
 
-    La première utilisation initialise le repère : les concours déjà présents
-    ne sont pas présentés à tort comme de nouvelles publications.
-    Les nouveautés restent visibles pendant toute la session en cours.
+    Le repère déjà-vu et les nouveautés en attente sont distincts.
+    Ainsi une actualisation, un changement de filtre ou une reconnexion ne
+    fait pas disparaître les concours marqués 🆕.
     """
-    nouveautes = set(st.session_state.get("nouveaux_concours_v11") or [])
     if not st.session_state.get("sb_access_token"):
-        return nouveautes, False
+        return set(), False
 
     liens_actuels = {
         x["url"].rstrip("/") for x in liste if x.get("url", "").startswith("https://")
     }
     try:
-        if "concours_deja_vus_v11" not in st.session_state:
-            profil = requete_supabase("/auth/v1/user")
-            donnees = ((profil or {}).get("user_metadata") or {}).get("concours_vus_v11")
-            if isinstance(donnees, list):
-                anciens = {url for url in donnees if isinstance(url, str)}
-                st.session_state["nouveaux_concours_v11"] = liens_actuels - anciens
-            else:
-                # Première visite avec cette fonction : on crée le point de départ.
-                anciens = set()
-                st.session_state["nouveaux_concours_v11"] = set()
-                st.session_state["nouveaux_initialises_v11"] = True
-            st.session_state.concours_deja_vus_v11 = anciens
+        profil = requete_supabase("/auth/v1/user")
+        metadata = (profil or {}).get("user_metadata") or {}
+        anciens_bruts = metadata.get("concours_vus_v11")
+        attente_brute = metadata.get("concours_nouveaux_en_attente_v11")
+        # Ne jamais marquer comme lus les concours non récupérés à cause
+        # d'une panne d'une rubrique.
+        attente = {
+            x for x in (attente_brute or []) if isinstance(x, str)
+        } if isinstance(attente_brute, list) else set()
+        if not isinstance(anciens_bruts, list):
+            # Première utilisation : créer le point de départ, sans inventer
+            # de nouveaux concours pour ceux qui étaient déjà présents.
+            if liens_actuels:
+                requete_supabase("/auth/v1/user", "PUT", {
+                    "data": {"concours_vus_v11": sorted(liens_actuels)[-1000:],
+                             "concours_nouveaux_en_attente_v11": []}
+                })
+            return set(), True
 
-        anciens = st.session_state.concours_deja_vus_v11
-        if liens_actuels - anciens:
-            if not st.session_state.get("nouveaux_initialises_v11"):
-                st.session_state.nouveaux_concours_v11 = (
-                    set(st.session_state.nouveaux_concours_v11) | (liens_actuels - anciens)
-                )
-            tous_vus = anciens | liens_actuels
-            # Vérification du résultat avant de considérer l'enregistrement comme fait.
-            reponse = requete_supabase("/auth/v1/user", "PUT", {
-                "data": {"concours_vus_v11": sorted(tous_vus)[-1000:]}
+        anciens = {x for x in anciens_bruts if isinstance(x, str)}
+        ajoutes = liens_actuels - anciens
+        if ajoutes:
+            attente |= ajoutes
+            # On garde les liens déjà vus, même s'ils ont disparu du forum.
+            requete_supabase("/auth/v1/user", "PUT", {
+                "data": {
+                    "concours_vus_v11": sorted(anciens | liens_actuels)[-1000:],
+                    "concours_nouveaux_en_attente_v11": sorted(attente)[-500:],
+                }
             })
-            vus_confirms = ((reponse or {}).get("user_metadata") or {}).get("concours_vus_v11")
-            if not isinstance(vus_confirms, list):
-                raise RuntimeError("Enregistrement des nouveautés non confirmé.")
-            st.session_state.concours_deja_vus_v11 = tous_vus
-            # L'initialisation est terminée ; les publications suivantes sont nouvelles.
-            st.session_state.nouveaux_initialises_v11 = False
-
-        return set(st.session_state.nouveaux_concours_v11), True
+        return attente, True
     except Exception:
         st.caption("Le repérage des nouveaux concours est momentanément indisponible.")
-        return set(st.session_state.get("nouveaux_concours_v11") or []), False
+        return set(), False
+
+
+def marquer_nouveaux_comme_vus():
+    """Efface uniquement les nouveautés en attente, jamais les participations."""
+    requete_supabase("/auth/v1/user", "PUT", {
+        "data": {"concours_nouveaux_en_attente_v11": []}
+    })
 
 
 def charger_participations():
@@ -646,9 +651,16 @@ def afficher_liste_concours():
     else:
         nouveaux_concours, nouveautes_disponibles = set(), False
     if nouveautes_disponibles:
-        st.caption(f"🆕 {len(nouveaux_concours)} nouveau(x) concours depuis ta précédente visite.")
-        if st.session_state.get("nouveaux_initialises_v11"):
-            st.caption("Repère initial créé aujourd'hui : les prochains concours ajoutés seront signalés.")
+        st.caption(f"🆕 {len(nouveaux_concours)} nouveau(x) concours en attente de lecture.")
+        if nouveaux_concours:
+            if st.button("✅ J'ai vu ces nouveautés", key="marquer_nouveaux_lus_v11"):
+                try:
+                    marquer_nouveaux_comme_vus()
+                    st.rerun(scope="fragment")
+                except RuntimeError as erreur:
+                    st.error("Impossible d'enregistrer la lecture : " + str(erreur))
+        else:
+            st.caption("Les prochains concours ajoutés seront signalés ici.")
     if connecte and ignores_ok and ignores:
         with st.expander(f"🚫 Concours sans intérêt ({len(ignores)})"):
             st.caption("Ces choix sont conservés dans ton compte. Tu peux réafficher un concours à tout moment.")
@@ -724,7 +736,7 @@ def afficher_liste_concours():
         st.caption("Réessaie avec « 🔄 Actualiser maintenant » plus tard. Tes participations et tes concours masqués sont conservés.")
     elif not affichables:
         if nouveaux_seulement:
-            st.info("Aucun nouveau concours pour le moment. Décoche « 🆕 Afficher seulement les nouveaux concours » pour voir les autres.")
+            st.info("Aucun concours marqué 🆕 en attente. Décoche « 🆕 Afficher seulement les nouveaux concours » pour voir les autres.")
         else:
             st.info("Aucun concours ne correspond aux filtres actuels. Essaie « Tous les concours pour les Belges », « Toutes » et un mot-clé vide.")
     taille_page = 12
