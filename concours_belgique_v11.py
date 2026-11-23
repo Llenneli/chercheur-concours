@@ -736,17 +736,8 @@ def afficher_liste_concours():
     )
     debut_page = (numero_page - 1) * taille_page
     a_afficher = affichables[debut_page:debut_page + taille_page]
-    # Chercher les liens externes pour tous les concours visibles de la page.
-    # Le cache évite de relire chaque discussion à chaque interaction.
-    urls_a_verifier = [
-        concours["url"] for concours in a_afficher
-        if not lien_direct_confirme(concours) and not concours.get("lien_direct_officiel")
-    ]
-    liens_automatiques = {}
-    if urls_a_verifier:
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            trouves = list(pool.map(liens_sans_erreur, urls_a_verifier))
-        liens_automatiques = dict(zip(urls_a_verifier, trouves))
+    # Les liens directs sont recherchés à la demande : ne plus bloquer
+    # toute la liste sur 12 lectures externes lentes ou indisponibles.
     for i, concours in enumerate(a_afficher, start=debut_page):
         with st.container(border=True):
             st.write("**" + concours["titre"] + "**")
@@ -819,19 +810,23 @@ def afficher_liste_concours():
                 else:
                     st.caption("Le lien direct connu correspond à une ancienne édition.")
             else:
-                externes = liens_automatiques.get(concours["url"], [])
-                if len(externes) == 1:
-                    st.link_button("🌐 Ouvrir le site du concours (à vérifier)",
-                                   externes[0], key=f"externe_{i}")
-                elif len(externes) > 1:
-                    st.caption("🔗 Plusieurs liens trouvés dans la discussion :")
-                    for j, externe in enumerate(externes):
-                        domaine = urlparse(externe).hostname or "Site externe"
-                        st.link_button("🌐 " + domaine + " (à vérifier)", externe,
-                                       key=f"externe_{i}_{j}")
-                else:
-                    st.caption("🔎 Aucun lien direct accessible automatiquement pour ce concours.")
-                st.caption("Vérifie la page du concours et ses conditions avant de participer.")
+                with st.expander("🔗 Rechercher le lien direct de ce concours"):
+                    st.caption("Lecture de la discussion à la demande pour éviter de ralentir toute la liste.")
+                    if st.button("🔎 Chercher le lien direct", key=f"chercher_lien_{i}"):
+                        with st.spinner("Recherche du lien direct…"):
+                            externes = liens_sans_erreur(concours["url"])
+                        if len(externes) == 1:
+                            st.link_button("🌐 Ouvrir le site du concours (à vérifier)",
+                                           externes[0], key=f"externe_{i}")
+                        elif len(externes) > 1:
+                            st.caption("🔗 Plusieurs liens trouvés dans la discussion :")
+                            for j, externe in enumerate(externes):
+                                domaine = urlparse(externe).hostname or "Site externe"
+                                st.link_button("🌐 " + domaine + " (à vérifier)",
+                                               externe, key=f"externe_{i}_{j}")
+                        else:
+                            st.caption("🔎 Aucun lien direct disponible actuellement. Ouvre la discussion du forum.")
+                        st.caption("Vérifie la page et les conditions avant de participer.")
             if not concours.get("lien_direct_officiel"):
                 st.link_button("Voir la discussion sur Fou de Concours", concours["url"], key=f"fdc_{i}")
     st.caption("Le bouton « Marquer comme joué » enregistre la participation sans numéro subsidiaire. Pour conserver le nombre envoyé, utilise plutôt l'onglet 🎯 Estimation. Les concours journaliers redeviennent disponibles le lendemain et les mensuels le mois suivant.")
