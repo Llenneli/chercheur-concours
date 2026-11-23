@@ -640,7 +640,11 @@ def afficher_liste_concours():
         chercher_foudeconcours.clear()
         chercher_sources_belges.clear()
     liste, erreurs = chercher()
-    nouveaux_concours, nouveautes_disponibles = reperer_nouveaux_concours(liste)
+    # Une panne des sites ne doit jamais modifier le repère de nouveautés.
+    if liste:
+        nouveaux_concours, nouveautes_disponibles = reperer_nouveaux_concours(liste)
+    else:
+        nouveaux_concours, nouveautes_disponibles = set(), False
     if nouveautes_disponibles:
         st.caption(f"🆕 {len(nouveaux_concours)} nouveau(x) concours depuis ta précédente visite.")
         if st.session_state.get("nouveaux_initialises_v11"):
@@ -655,7 +659,14 @@ def afficher_liste_concours():
                 except RuntimeError as erreur:
                     st.error(str(erreur))
     if erreurs:
-        st.warning("Certaines rubriques n'ont pas pu être lues automatiquement : " + ", ".join(erreurs))
+        st.warning("⚠️ Certains sites de concours sont momentanément inaccessibles à la recherche automatique : " + ", ".join(dict.fromkeys(erreurs)) + ". Ce n'est pas un problème de ton carnet.")
+        st.caption("Tu peux toujours ouvrir les sites directement. La V11 réessaiera à la prochaine actualisation.")
+        if any(x.startswith("Fou de Concours") for x in erreurs):
+            st.link_button("🌐 Voir les concours belges sur Fou de Concours",
+                           "https://www.foudeconcours.com/forum/concours/concours-belges-pour-les-belges")
+        if "Radio Contact" in erreurs:
+            st.link_button("🌐 Voir les concours Radio Contact",
+                           "https://www.radiocontact.be/concours/")
         if "Fou de Concours — Journaliers" in erreurs:
             st.link_button("Consulter les journaliers sur le forum",
                 "https://www.foudeconcours.com/forum/concours/concours-r%C3%A3%C2%A9guliers/concours-journaliers")
@@ -708,6 +719,14 @@ def afficher_liste_concours():
             continue
         affichables.append(concours)
     st.write(f"**{len(affichables)} concours affiché(s)**")
+    if not liste:
+        st.error("Aucun résultat n'a pu être récupéré actuellement. Les sites sources peuvent bloquer temporairement les recherches automatiques.")
+        st.caption("Réessaie avec « 🔄 Actualiser maintenant » plus tard. Tes participations et tes concours masqués sont conservés.")
+    elif not affichables:
+        if nouveaux_seulement:
+            st.info("Aucun nouveau concours pour le moment. Décoche « 🆕 Afficher seulement les nouveaux concours » pour voir les autres.")
+        else:
+            st.info("Aucun concours ne correspond aux filtres actuels. Essaie « Tous les concours pour les Belges », « Toutes » et un mot-clé vide.")
     taille_page = 12
     pages = max(1, (len(affichables) + taille_page - 1) // taille_page)
     numero_page = st.selectbox(
